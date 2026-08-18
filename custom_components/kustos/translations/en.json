@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Kustos",
+        "description": "Set up the Kustos alarm system. All configuration happens in the Kustos sidebar panel afterwards."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Kustos is already set up."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "ready": {
+        "name": "Ready"
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+acknowledge:
+  name: Acknowledge alarm
+  description: Clears the alarm memory of a Kustos panel after an alarm.
+  target:
+    entity:
+      integration: kustos
+      domain: alarm_control_panel

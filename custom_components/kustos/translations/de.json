@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Kustos",
+        "description": "Richten Sie das Kustos-Alarmsystem ein. Die gesamte Konfiguration erfolgt anschließend im Kustos-Panel in der Seitenleiste."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Kustos ist bereits eingerichtet."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "ready": {
+        "name": "Bereit"
+      }
+    }
+  }
+}
