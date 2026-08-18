@@ -115,16 +115,24 @@ PANEL_OPTIONS_SCHEMA = vol.Schema(
     }
 )
 
-PANEL_FIELDS = vol.Schema(
-    {
-        vol.Required("scope"): SCOPE_SCHEMA,
-        vol.Required("enabled", default=True): cv.boolean,
-        vol.Required("modes", default=dict): vol.Schema(
-            {vol.Coerce(ArmMode): MODE_CONFIG_SCHEMA}
-        ),
-        vol.Required("options", default=dict): PANEL_OPTIONS_SCHEMA,
-    }
-)
+MODES_MAP_SCHEMA = vol.Schema({vol.Coerce(ArmMode): MODE_CONFIG_SCHEMA})
+
+# Create: full document with defaults. Update: every field optional; sub-
+# objects (scope/modes/options) are replaced as a whole, never merged field-
+# wise, so a partial update can never silently reset sibling values.
+PANEL_CREATE_FIELDS = {
+    vol.Required("scope"): SCOPE_SCHEMA,
+    vol.Required("enabled", default=True): cv.boolean,
+    vol.Required("modes", default=dict): MODES_MAP_SCHEMA,
+    vol.Required("options", default=dict): PANEL_OPTIONS_SCHEMA,
+}
+PANEL_UPDATE_FIELDS = {
+    vol.Optional("scope"): SCOPE_SCHEMA,
+    vol.Optional("enabled"): cv.boolean,
+    vol.Optional("modes"): MODES_MAP_SCHEMA,
+    vol.Optional("options"): PANEL_OPTIONS_SCHEMA,
+}
+PANEL_FIELDS = vol.Schema(PANEL_CREATE_FIELDS)
 
 
 # ---------------------------------------------------------------------------
@@ -150,21 +158,28 @@ ZONE_OPTIONS_SCHEMA = vol.Schema(
     }
 )
 
-ZONE_FIELDS = vol.Schema(
-    {
-        vol.Required("entity_id"): cv.entity_id,
-        vol.Required("panel_id"): cv.string,
-        vol.Optional("name"): cv.string,
-        # Which alarm type this zone raises. Types in ALWAYS_ON_ALARM_TYPES
-        # are armed 24/7 regardless of panel state (derived, no extra flag).
-        vol.Required("alarm_type", default=AlarmType.BURGLARY): vol.Coerce(AlarmType),
-        # Role per arm mode; modes not listed fall back to "inactive".
-        vol.Required("modes", default=dict): vol.Schema(
-            {vol.Coerce(ArmMode): vol.Coerce(ZoneRole)}
-        ),
-        vol.Required("options", default=dict): ZONE_OPTIONS_SCHEMA,
-    }
-)
+ZONE_MODES_MAP_SCHEMA = vol.Schema({vol.Coerce(ArmMode): vol.Coerce(ZoneRole)})
+
+ZONE_CREATE_FIELDS = {
+    vol.Required("entity_id"): cv.entity_id,
+    vol.Required("panel_id"): cv.string,
+    vol.Optional("name"): cv.string,
+    # Which alarm type this zone raises. Types in ALWAYS_ON_ALARM_TYPES
+    # are armed 24/7 regardless of panel state (derived, no extra flag).
+    vol.Required("alarm_type", default=AlarmType.BURGLARY): vol.Coerce(AlarmType),
+    # Role per arm mode; modes not listed fall back to "inactive".
+    vol.Required("modes", default=dict): ZONE_MODES_MAP_SCHEMA,
+    vol.Required("options", default=dict): ZONE_OPTIONS_SCHEMA,
+}
+ZONE_UPDATE_FIELDS = {
+    vol.Optional("entity_id"): cv.entity_id,
+    vol.Optional("panel_id"): cv.string,
+    vol.Optional("name"): cv.string,
+    vol.Optional("alarm_type"): vol.Coerce(AlarmType),
+    vol.Optional("modes"): ZONE_MODES_MAP_SCHEMA,
+    vol.Optional("options"): ZONE_OPTIONS_SCHEMA,
+}
+ZONE_FIELDS = vol.Schema(ZONE_CREATE_FIELDS)
 
 
 def merge_defaults(defaults: dict[str, Any], stored: dict[str, Any]) -> dict[str, Any]:
