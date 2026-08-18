@@ -58,14 +58,26 @@ class KustosHub:
         self._zone_by_entity: dict[str, list[tuple[str, str]]] = {}
         self.snapshots = SnapshotManager(hass, storage)
         self.engine = ReactionEngine(hass, storage, self.snapshots)
+        self._restoring = False
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def async_start(self) -> None:
+        # Deterministic boot order (regression: boot race re-captured
+        # snapshots mid-flash and restore wrote alarm red back): restore the
+        # FSMs without engine side effects, resume persisted instances, then
+        # reconcile exactly once.
+        self._restoring = True
         self._rebuild()
         self._restore_runtime()
+        self._restoring = False
+        # Tear stale instances down BEFORE resuming: a resumed loop may fire
+        # its first command instantly and re-pollute the snapshots.
+        for panel_id, fsm in self.fsms.items():
+            if fsm.state is not PanelState.TRIGGERED and self.engine.has_instances(panel_id):
+                await self.engine.async_stop_panel(panel_id, restore=True)
         await self.engine.async_resume()
         # Zone changes rebuild in place; panel add/remove is handled by the
         # config entry (reload) so entities are created/removed cleanly.
@@ -353,7 +365,8 @@ class KustosHub:
         if fx.state_changed:
             fsm = self.fsms.get(panel_id)
             if (
-                fsm is not None
+                not self._restoring
+                and fsm is not None
                 and fsm.state is not PanelState.TRIGGERED
                 and self.engine.has_instances(panel_id)
             ):
