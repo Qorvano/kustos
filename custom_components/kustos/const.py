@@ -17,6 +17,7 @@ STORAGE_KEY_ZONES = f"{DOMAIN}.zones"
 STORAGE_KEY_PROFILES = f"{DOMAIN}.profiles"
 STORAGE_KEY_USERS = f"{DOMAIN}.users"
 STORAGE_KEY_RUNTIME = f"{DOMAIN}.runtime"
+STORAGE_KEY_SNAPSHOTS = f"{DOMAIN}.snapshots"
 
 
 class AlarmType(StrEnum):

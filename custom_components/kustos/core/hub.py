@@ -19,12 +19,15 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from ..const import (
+    ATTR_ALARM_TYPE,
+    EVENT_TRIGGERED,
     ArmMode,
     PanelScope,
     SIGNAL_CONFIG_UPDATED,
     SIGNAL_PANEL_STATE,
     AlarmType,
 )
+from .engine import ReactionEngine
 from .fsm import (
     ArmResult,
     Effects,
@@ -34,6 +37,7 @@ from .fsm import (
     PanelState,
     ZoneConfig,
 )
+from .snapshot import SnapshotManager
 
 if TYPE_CHECKING:
     from ..storage import KustosStorage
@@ -52,6 +56,8 @@ class KustosHub:
         self._zone_unsub: Any | None = None
         self._config_unsub: Any | None = None
         self._zone_by_entity: dict[str, list[tuple[str, str]]] = {}
+        self.snapshots = SnapshotManager(hass, storage)
+        self.engine = ReactionEngine(hass, storage, self.snapshots)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -60,6 +66,7 @@ class KustosHub:
     async def async_start(self) -> None:
         self._rebuild()
         self._restore_runtime()
+        await self.engine.async_resume()
         # Zone changes rebuild in place; panel add/remove is handled by the
         # config entry (reload) so entities are created/removed cleanly.
         self._config_unsub = self._storage.zones.async_add_listener(
@@ -67,6 +74,8 @@ class KustosHub:
         )
 
     async def async_stop(self) -> None:
+        # No restore here: the alarm may still be real; resume happens on boot.
+        await self.engine.async_shutdown()
         for cancel in self._timers.values():
             cancel()
         self._timers.clear()
@@ -306,6 +315,13 @@ class KustosHub:
     def _apply_effects(self, panel_id: str, fx: Effects) -> None:
         for event_name, payload in fx.events:
             self._hass.bus.async_fire(event_name, payload)
+            if event_name == EVENT_TRIGGERED:
+                fsm = self.fsms[panel_id]
+                self._hass.async_create_task(
+                    self.engine.async_start(
+                        panel_id, fsm.area_id, payload[ATTR_ALARM_TYPE]
+                    )
+                )
 
         if fx.cancel_timer and panel_id in self._timers:
             self._timers.pop(panel_id)()
@@ -335,5 +351,14 @@ class KustosHub:
             else:
                 self._storage.delay_save_runtime()
         if fx.state_changed:
+            fsm = self.fsms.get(panel_id)
+            if (
+                fsm is not None
+                and fsm.state is not PanelState.TRIGGERED
+                and self.engine.has_instances(panel_id)
+            ):
+                self._hass.async_create_task(
+                    self.engine.async_stop_panel(panel_id, restore=True)
+                )
             async_dispatcher_send(self._hass, SIGNAL_PANEL_STATE, panel_id)
             async_dispatcher_send(self._hass, SIGNAL_PANEL_STATE, MASTER_ID)

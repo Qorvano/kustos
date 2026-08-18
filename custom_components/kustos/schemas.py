@@ -42,6 +42,21 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         # (arming/pending/triggered/disarm) always save immediately.
         "runtime_save_delay_s": 2.0,
     },
+    "engine": {
+        # Entities that came back after being unavailable during an alarm get
+        # one late restore attempt within this window.
+        "restore_retry_window_s": 300.0,
+        # Claim priority when two alarm types fight over the same entity;
+        # earlier in the list wins. Life safety outranks burglary; holdup is
+        # last because a silent alarm must not touch shared entities anyway.
+        "alarm_type_priority": [
+            "fire", "co", "water", "tamper", "panic", "burglary",
+            "technical", "holdup",
+        ],
+        # Alarm types that may unlock doors (escape route). Everything else
+        # is refused the unlock block outright.
+        "life_safety_unlock_types": ["fire", "co"],
+    },
 }
 
 _NON_NEGATIVE_SECONDS = vol.All(vol.Coerce(float), vol.Range(min=0))
@@ -65,6 +80,13 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Required("storage"): vol.Schema(
             {
                 vol.Required("runtime_save_delay_s"): _NON_NEGATIVE_SECONDS,
+            }
+        ),
+        vol.Required("engine"): vol.Schema(
+            {
+                vol.Required("restore_retry_window_s"): _NON_NEGATIVE_SECONDS,
+                vol.Required("alarm_type_priority"): [vol.Coerce(AlarmType)],
+                vol.Required("life_safety_unlock_types"): [vol.Coerce(AlarmType)],
             }
         ),
     }
@@ -120,17 +142,25 @@ MODES_MAP_SCHEMA = vol.Schema({vol.Coerce(ArmMode): MODE_CONFIG_SCHEMA})
 # Create: full document with defaults. Update: every field optional; sub-
 # objects (scope/modes/options) are replaced as a whole, never merged field-
 # wise, so a partial update can never silently reset sibling values.
+ALARM_TYPE_ASSIGNMENT_SCHEMA = vol.Schema(
+    {vol.Coerce(AlarmType): vol.Schema({vol.Required("profile_id"): vol.Any(None, cv.string)})}
+)
+
 PANEL_CREATE_FIELDS = {
     vol.Required("scope"): SCOPE_SCHEMA,
     vol.Required("enabled", default=True): cv.boolean,
     vol.Required("modes", default=dict): MODES_MAP_SCHEMA,
     vol.Required("options", default=dict): PANEL_OPTIONS_SCHEMA,
+    # Which reaction profile runs per alarm type (critique finding 4: the
+    # panel document is the single source of this assignment).
+    vol.Required("alarm_types", default=dict): ALARM_TYPE_ASSIGNMENT_SCHEMA,
 }
 PANEL_UPDATE_FIELDS = {
     vol.Optional("scope"): SCOPE_SCHEMA,
     vol.Optional("enabled"): cv.boolean,
     vol.Optional("modes"): MODES_MAP_SCHEMA,
     vol.Optional("options"): PANEL_OPTIONS_SCHEMA,
+    vol.Optional("alarm_types"): ALARM_TYPE_ASSIGNMENT_SCHEMA,
 }
 PANEL_FIELDS = vol.Schema(PANEL_CREATE_FIELDS)
 
@@ -191,3 +221,132 @@ def merge_defaults(defaults: dict[str, Any], stored: dict[str, Any]) -> dict[str
         else:
             result[key] = value
     return result
+
+
+# ---------------------------------------------------------------------------
+# Reaction profiles (M2): 1-3 stages as a deterministic timeline from t0
+# ---------------------------------------------------------------------------
+
+_PERCENT = vol.All(vol.Coerce(float), vol.Range(min=1, max=100))
+_POSITIVE_SECONDS = vol.All(vol.Coerce(float), vol.Range(min=0.1))
+_RGB = vol.All([vol.All(vol.Coerce(int), vol.Range(min=0, max=255))], vol.Length(min=3, max=3))
+
+_BLOCK_COMMON = {vol.Required("type"): str}
+
+BLOCK_SCHEMAS: dict[str, vol.Schema] = {
+    # Color-capable lights blink; the rest behaves per non_color_behavior.
+    "flash_lights": vol.Schema(
+        {
+            vol.Required("type"): "flash_lights",
+            vol.Required("targets"): [cv.entity_id],
+            vol.Required("color_rgb", default=[255, 0, 0]): _RGB,
+            vol.Required("brightness_pct", default=100.0): _PERCENT,
+            # Full blink period (on + off) and fade portion of each half.
+            vol.Required("period_s", default=2.0): _POSITIVE_SECONDS,
+            vol.Required("fade_s", default=0.4): vol.All(vol.Coerce(float), vol.Range(min=0)),
+            vol.Required("non_color_behavior", default="off"): vol.In(
+                ["off", "hard_blink", "ignore"]
+            ),
+        }
+    ),
+    # Steady on (outdoor lights); refresh re-sends for self-timing floodlights.
+    "lights_on": vol.Schema(
+        {
+            vol.Required("type"): "lights_on",
+            vol.Required("targets"): [cv.entity_id],
+            vol.Required("brightness_pct", default=100.0): _PERCENT,
+            vol.Required("refresh_interval_s", default=0.0): vol.All(
+                vol.Coerce(float), vol.Range(min=0)
+            ),
+        }
+    ),
+    # Sounders in three flavours, derived from the entity domain:
+    # siren -> native; switch/input_boolean -> on/off; button/input_button ->
+    # pulse plus retrigger interval (X-Sense fire drill pattern).
+    "sound": vol.Schema(
+        {
+            vol.Required("type"): "sound",
+            vol.Required("targets"): [cv.entity_id],
+            vol.Required("retrigger_interval_s", default=30.0): _POSITIVE_SECONDS,
+            # Deliberately no default: the legal siren-duration limit is the
+            # user's call; the engine only enforces that a value exists.
+            vol.Required("max_duration_s"): _POSITIVE_SECONDS,
+        }
+    ),
+    # Repeating announcement via a notify service, with optional volume set
+    # and per-device fallback for players whose volume cannot be read.
+    "announce_loop": vol.Schema(
+        {
+            vol.Required("type"): "announce_loop",
+            vol.Required("notify_service"): cv.string,  # e.g. "notify.alexa_media"
+            vol.Required("message"): cv.string,
+            vol.Required("interval_s"): _POSITIVE_SECONDS,
+            vol.Required("media_targets", default=list): [cv.entity_id],
+            vol.Optional("volume_pct"): _PERCENT,
+            vol.Optional("volume_fallback_pct"): _PERCENT,
+            vol.Optional("data", default=dict): dict,
+        }
+    ),
+    # One-shot notification at stage start.
+    "notify": vol.Schema(
+        {
+            vol.Required("type"): "notify",
+            vol.Required("service"): cv.string,
+            vol.Required("message"): cv.string,
+            vol.Optional("title"): cv.string,
+            vol.Optional("data", default=dict): dict,
+        }
+    ),
+    # Lock or unlock; unlock is validated against life_safety_unlock_types.
+    "lock": vol.Schema(
+        {
+            vol.Required("type"): "lock",
+            vol.Required("targets"): [cv.entity_id],
+            vol.Required("action"): vol.In(["lock", "unlock"]),
+        }
+    ),
+}
+
+
+def _validate_block(block: dict) -> dict:
+    if not isinstance(block, dict) or "type" not in block:
+        raise vol.Invalid("block needs a type")
+    schema = BLOCK_SCHEMAS.get(block["type"])
+    if schema is None:
+        raise vol.Invalid(f"unknown block type {block['type']}")
+    return schema(block)
+
+
+STAGE_SCHEMA = vol.Schema(
+    {
+        # None = stage runs until the alarm ends (only valid for the last stage).
+        vol.Required("duration_s", default=None): vol.Any(None, _POSITIVE_SECONDS),
+        vol.Required("blocks"): [_validate_block],
+    }
+)
+
+
+def _validate_stages(stages: list) -> list:
+    if not 1 <= len(stages) <= 3:
+        raise vol.Invalid("profiles have 1 to 3 stages")
+    for stage in stages[:-1]:
+        if stage["duration_s"] is None:
+            raise vol.Invalid("only the last stage may have an open duration")
+    return stages
+
+
+PROFILE_CREATE_FIELDS = {
+    vol.Required("name"): cv.string,
+    vol.Required("stages"): vol.All([STAGE_SCHEMA], _validate_stages),
+}
+PROFILE_UPDATE_FIELDS = {
+    vol.Optional("name"): cv.string,
+    vol.Optional("stages"): vol.All([STAGE_SCHEMA], _validate_stages),
+}
+PROFILE_FIELDS = vol.Schema(PROFILE_CREATE_FIELDS)
+
+# Blocks that make an alarm locally perceivable; forbidden for silent types
+# (critique finding 1: a hold-up alarm must not be observable on site).
+PERCEIVABLE_BLOCK_TYPES = frozenset(
+    {"flash_lights", "lights_on", "sound", "announce_loop"}
+)

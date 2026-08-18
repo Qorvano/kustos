@@ -17,6 +17,8 @@ from .const import DOMAIN
 from .schemas import (
     PANEL_CREATE_FIELDS,
     PANEL_UPDATE_FIELDS,
+    PROFILE_CREATE_FIELDS,
+    PROFILE_UPDATE_FIELDS,
     SETTINGS_SCHEMA,
     ZONE_CREATE_FIELDS,
     ZONE_UPDATE_FIELDS,
@@ -42,6 +44,14 @@ def async_register(hass: HomeAssistant, storage: KustosStorage) -> None:
         "zone",
         ZONE_CREATE_FIELDS,
         ZONE_UPDATE_FIELDS,
+        admin_only=True,
+    ).async_setup(hass)
+    DictStorageCollectionWebsocket(
+        storage.profiles,
+        f"{DOMAIN}/profiles",
+        "profile",
+        PROFILE_CREATE_FIELDS,
+        PROFILE_UPDATE_FIELDS,
         admin_only=True,
     ).async_setup(hass)
     websocket_api.async_register_command(hass, ws_settings_get)

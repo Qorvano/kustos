@@ -17,14 +17,17 @@ from homeassistant.util import ulid as ulid_util
 
 from .const import (
     STORAGE_KEY_PANELS,
+    STORAGE_KEY_PROFILES,
     STORAGE_KEY_RUNTIME,
     STORAGE_KEY_SETTINGS,
+    STORAGE_KEY_SNAPSHOTS,
     STORAGE_KEY_ZONES,
     STORAGE_VERSION,
 )
 from .schemas import (
     DEFAULT_SETTINGS,
     PANEL_FIELDS,
+    PROFILE_FIELDS,
     SETTINGS_SCHEMA,
     ZONE_FIELDS,
     merge_defaults,
@@ -59,6 +62,10 @@ class ZoneCollection(_UlidCollection):
     CREATE_UPDATE_SCHEMA = ZONE_FIELDS
 
 
+class ProfileCollection(_UlidCollection):
+    CREATE_UPDATE_SCHEMA = PROFILE_FIELDS
+
+
 class KustosStorage:
     """Owns all Kustos stores and collections."""
 
@@ -76,6 +83,13 @@ class KustosStorage:
         self.zones = ZoneCollection(
             Store(hass, STORAGE_VERSION, STORAGE_KEY_ZONES, atomic_writes=True)
         )
+        self.profiles = ProfileCollection(
+            Store(hass, STORAGE_VERSION, STORAGE_KEY_PROFILES, atomic_writes=True)
+        )
+        self._snapshot_store: Store[dict[str, Any]] = Store(
+            hass, STORAGE_VERSION, STORAGE_KEY_SNAPSHOTS, atomic_writes=True
+        )
+        self.snapshots: dict[str, Any] = {}
         self.settings: dict[str, Any] = {}
         self.runtime: dict[str, Any] = {}
 
@@ -87,6 +101,8 @@ class KustosStorage:
 
         await self.panels.async_load()
         await self.zones.async_load()
+        await self.profiles.async_load()
+        self.snapshots = await self._snapshot_store.async_load() or {}
         self.runtime = await self._runtime_store.async_load() or {"panels": {}}
 
     async def async_save_settings(self, settings: dict[str, Any]) -> None:
@@ -96,6 +112,10 @@ class KustosStorage:
     async def async_save_runtime(self) -> None:
         """Immediate save; used for critical FSM transitions."""
         await self._runtime_store.async_save(self.runtime)
+
+    async def async_save_snapshots(self) -> None:
+        """Write-ahead: must complete before the first mutating command."""
+        await self._snapshot_store.async_save(self.snapshots)
 
     @callback
     def delay_save_runtime(self) -> None:
