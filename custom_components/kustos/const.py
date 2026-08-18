@@ -88,6 +88,7 @@ EVENT_DISARMED = f"{DOMAIN}_disarmed"
 EVENT_ARM_FAILED = f"{DOMAIN}_arm_failed"
 EVENT_ACKNOWLEDGED = f"{DOMAIN}_acknowledged"
 EVENT_ZONE_BYPASSED = f"{DOMAIN}_zone_bypassed"
+EVENT_WALK_TEST_ZONE = f"{DOMAIN}_walk_test_zone"
 
 # Event/service payload keys.
 ATTR_PANEL_ID = "panel_id"

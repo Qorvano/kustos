@@ -30,6 +30,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "trigger_time_s": 180.0,
         # Contact debounce to swallow the bounce of a closing door; 0 = off.
         "debounce_s": 0.0,
+        # A forgotten walk test must end itself; 15 min covers a full round
+        # through the house comfortably.
+        "walk_test_timeout_s": 900.0,
     },
     "security": {
         # Alarm memory requires an explicit acknowledge by default.
@@ -41,6 +44,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         # Non-critical runtime saves are debounced; critical transitions
         # (arming/pending/triggered/disarm) always save immediately.
         "runtime_save_delay_s": 2.0,
+    },
+    "audit": {
+        # How many entries a single audit query returns at most.
+        "query_limit": 200,
     },
     "engine": {
         # Entities that came back after being unavailable during an alarm get
@@ -69,6 +76,7 @@ SETTINGS_SCHEMA = vol.Schema(
                 vol.Required("entry_delay_s"): _NON_NEGATIVE_SECONDS,
                 vol.Required("trigger_time_s"): _NON_NEGATIVE_SECONDS,
                 vol.Required("debounce_s"): _NON_NEGATIVE_SECONDS,
+                vol.Required("walk_test_timeout_s"): _NON_NEGATIVE_SECONDS,
             }
         ),
         vol.Required("security"): vol.Schema(
@@ -81,6 +89,9 @@ SETTINGS_SCHEMA = vol.Schema(
             {
                 vol.Required("runtime_save_delay_s"): _NON_NEGATIVE_SECONDS,
             }
+        ),
+        vol.Required("audit"): vol.Schema(
+            {vol.Required("query_limit"): vol.All(vol.Coerce(int), vol.Range(min=1, max=5000))}
         ),
         vol.Required("engine"): vol.Schema(
             {
@@ -185,6 +196,11 @@ ZONE_OPTIONS_SCHEMA = vol.Schema(
         vol.Required("invert", default=False): cv.boolean,
         # Per-zone debounce override; absent = settings default.
         vol.Optional("debounce_s"): _NON_NEGATIVE_SECONDS,
+        # What an unavailable zone does to arming: ignore silently, block the
+        # arm attempt, or get bypassed visibly (supervision policy, M4).
+        vol.Required("unavailable_policy", default="ignore"): vol.In(
+            ["ignore", "block_arm", "auto_bypass"]
+        ),
     }
 )
 

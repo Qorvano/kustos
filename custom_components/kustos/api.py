@@ -70,6 +70,8 @@ def async_register(hass: HomeAssistant, storage: KustosStorage) -> None:
     websocket_api.async_register_command(hass, ws_settings_get)
     websocket_api.async_register_command(hass, ws_settings_update)
     websocket_api.async_register_command(hass, ws_state_list)
+    websocket_api.async_register_command(hass, ws_audit_query)
+    websocket_api.async_register_command(hass, ws_walk_test)
 
 
 def _storage(hass: HomeAssistant) -> KustosStorage:
@@ -141,6 +143,67 @@ async def ws_settings_update(
         return
     await storage.async_save_settings(validated)
     connection.send_result(msg["id"], validated)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/audit/query",
+        vol.Optional("month"): str,
+        vol.Optional("limit"): vol.All(vol.Coerce(int), vol.Range(min=1)),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_audit_query(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    from homeassistant.util import dt as dt_util
+
+    hub = _hub(hass)
+    if hub is None:
+        connection.send_error(msg["id"], "not_loaded", "Kustos is not loaded")
+        return
+    storage = _storage(hass)
+    month = msg.get("month") or dt_util.utcnow().strftime("%Y-%m")
+    limit = min(
+        msg.get("limit") or storage.setting("audit", "query_limit"),
+        storage.setting("audit", "query_limit"),
+    )
+    connection.send_result(
+        msg["id"], {"month": month, "entries": await hub.audit.async_query(month, limit)}
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/walk_test",
+        vol.Required("panel_id"): str,
+        vol.Required("action"): vol.In(["start", "stop"]),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_walk_test(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    hub = _hub(hass)
+    if hub is None or msg["panel_id"] not in hub.fsms:
+        connection.send_error(msg["id"], "not_found", "unknown panel")
+        return
+    actor = f"user:{connection.user.name}" if connection.user else "ws"
+    if msg["action"] == "start":
+        await hub.async_walk_test_start(msg["panel_id"], actor)
+    else:
+        await hub.async_walk_test_stop(msg["panel_id"], actor)
+    info = hub.walk_tests.get(msg["panel_id"])
+    connection.send_result(
+        msg["id"],
+        {
+            "active": info is not None,
+            "ends_at": info["ends_at"] if info else None,
+            "tested_zones": sorted(info["tested"]) if info else [],
+        },
+    )
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/state/list"})

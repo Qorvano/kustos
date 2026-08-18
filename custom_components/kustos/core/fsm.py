@@ -71,6 +71,7 @@ class ZoneConfig:
     allow_open: bool = False
     auto_bypass: bool = False
     trigger_when_unavailable: bool = False
+    unavailable_policy: str = "ignore"
 
     @property
     def always_on(self) -> bool:
@@ -148,9 +149,23 @@ class PanelFsm:
     # Event payload helpers
     # ------------------------------------------------------------------
 
-    def blocking_zones(self, mode: ArmMode, open_zones: set[str]) -> list[str]:
+    def blocking_zones(
+        self,
+        mode: ArmMode,
+        open_zones: set[str],
+        unavailable_zones: set[str] | None = None,
+    ) -> list[str]:
         """Zones that would block arming into mode right now (ready check)."""
-        return self._classify_open(mode, open_zones, force=False, skip_delay=False)[0]
+        blocking = self._classify_open(mode, open_zones, force=False, skip_delay=False)[0]
+        for zone_id in sorted(unavailable_zones or set()):
+            zone = self.zones.get(zone_id)
+            if (
+                zone is not None
+                and zone.role_in(mode) is not ZoneRole.INACTIVE
+                and zone.unavailable_policy == "block_arm"
+            ):
+                blocking.append(zone_id)
+        return blocking
 
     def _classify_open(
         self, mode: ArmMode, open_zones: set[str], force: bool, skip_delay: bool
@@ -191,6 +206,7 @@ class PanelFsm:
         actor: str,
         force: bool = False,
         skip_delay: bool = False,
+        unavailable_zones: set[str] | None = None,
     ) -> tuple[ArmResult, Effects]:
         """Arm into a mode. open_zones = zone_ids currently open (hub-supplied)."""
         fx = Effects()
@@ -203,6 +219,14 @@ class PanelFsm:
         blocking, bypassed = self._classify_open(
             mode, open_zones, force=force, skip_delay=skip_delay
         )
+        for zone_id in sorted(unavailable_zones or set()):
+            zone = self.zones.get(zone_id)
+            if zone is None or zone.role_in(mode) is ZoneRole.INACTIVE:
+                continue
+            if zone.unavailable_policy == "block_arm" and not force:
+                blocking.append(zone_id)
+            elif zone.unavailable_policy == "auto_bypass" or force:
+                bypassed.add(zone_id)
 
         if blocking:
             payload = self._base_payload(actor) | {

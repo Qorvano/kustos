@@ -17,17 +17,23 @@ from homeassistant.helpers.event import (
     async_track_point_in_utc_time,
     async_track_state_change_event,
 )
+from datetime import timedelta
+
 from homeassistant.util import dt as dt_util
 
 from ..const import (
     ATTR_ALARM_TYPE,
+    ATTR_ENTITY_ID,
+    ATTR_ZONE_ID,
     EVENT_TRIGGERED,
+    EVENT_WALK_TEST_ZONE,
     ArmMode,
     PanelScope,
     SIGNAL_CONFIG_UPDATED,
     SIGNAL_PANEL_STATE,
     AlarmType,
 )
+from .audit import AuditLog
 from .auth import needs_rehash, verify_pin
 from .engine import ReactionEngine
 from .fsm import (
@@ -60,7 +66,10 @@ class KustosHub:
         self._zone_by_entity: dict[str, list[tuple[str, str]]] = {}
         self.snapshots = SnapshotManager(hass, storage)
         self.engine = ReactionEngine(hass, storage, self.snapshots)
+        self.audit = AuditLog(hass)
         self._restoring = False
+        # Walk test: panel_id -> {"ends_at", "tested", "cancel"}
+        self.walk_tests: dict[str, dict[str, Any]] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -138,6 +147,9 @@ class KustosHub:
                 allow_open=item["options"]["allow_open"],
                 auto_bypass=item["options"]["auto_bypass"],
                 trigger_when_unavailable=item["options"]["trigger_when_unavailable"],
+                # .get: zone documents stored before M4 lack the key; the
+                # fallback mirrors the schema default.
+                unavailable_policy=item["options"].get("unavailable_policy", "ignore"),
             )
             zones_by_panel.setdefault(item["panel_id"], {})[zone.zone_id] = zone
             self._zone_by_entity.setdefault(item["entity_id"], []).append(
@@ -215,6 +227,20 @@ class KustosHub:
                 continue
             zone = fsm.zones.get(zone_id)
             if zone is None:
+                continue
+            if panel_id in self.walk_tests:
+                if new_state.state == STATE_ON and (
+                    old_state is None or old_state.state != STATE_ON
+                ):
+                    self.walk_tests[panel_id]["tested"].add(zone_id)
+                    payload = {
+                        "panel_id": panel_id,
+                        ATTR_ZONE_ID: zone_id,
+                        ATTR_ENTITY_ID: entity_id,
+                    }
+                    self._hass.bus.async_fire(EVENT_WALK_TEST_ZONE, payload)
+                    self._audit("walk_test_zone", payload)
+                    async_dispatcher_send(self._hass, SIGNAL_PANEL_STATE, panel_id)
                 continue
             if new_state.state == STATE_UNAVAILABLE:
                 self._apply_effects(panel_id, fsm.zone_unavailable(zone_id))
@@ -334,7 +360,12 @@ class KustosHub:
             actor = f"user:{user['name']}"
         fsm = self.fsms[panel_id]
         result, fx = fsm.arm(
-            mode, self._open_zone_ids(panel_id), actor, force=force, skip_delay=skip_delay
+            mode,
+            self._open_zone_ids(panel_id),
+            actor,
+            force=force,
+            skip_delay=skip_delay,
+            unavailable_zones=self._unavailable_zone_ids(panel_id),
         )
         self._apply_effects(panel_id, fx)
         return result
@@ -354,6 +385,10 @@ class KustosHub:
         fsm = self.fsms[panel_id]
         self._apply_effects(panel_id, fsm.disarm(actor))
         if is_duress:
+            # Audit only; nothing on the bus, nothing observable (finding 1).
+            self._audit(
+                "duress_disarm", {"panel_id": panel_id, "user": user["name"]}
+            )
             await self.engine.async_start(
                 panel_id, fsm.area_id, AlarmType.HOLDUP, detached=True
             )
@@ -370,9 +405,66 @@ class KustosHub:
             panel_id, restore=True, include_detached=True
         )
 
+    def _audit(self, kind: str, data: dict[str, Any]) -> None:
+        self._hass.async_create_background_task(
+            self.audit.async_append(kind, data), name="kustos_audit"
+        )
+
+    def _unavailable_zone_ids(self, panel_id: str) -> set[str]:
+        fsm = self.fsms.get(panel_id)
+        if fsm is None:
+            return set()
+        result = set()
+        for zone_id, zone in fsm.zones.items():
+            state = self._hass.states.get(zone.entity_id)
+            if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                result.add(zone_id)
+        return result
+
     def blocking_zones(self, panel_id: str, mode: ArmMode) -> list[str]:
         fsm = self.fsms[panel_id]
-        return fsm.blocking_zones(mode, self._open_zone_ids(panel_id))
+        return fsm.blocking_zones(
+            mode, self._open_zone_ids(panel_id), self._unavailable_zone_ids(panel_id)
+        )
+
+    # ------------------------------------------------------------------
+    # Walk test (M4): trips are announced and recorded, never alarmed
+    # ------------------------------------------------------------------
+
+    async def async_walk_test_start(self, panel_id: str, actor: str) -> None:
+        await self.async_walk_test_stop(panel_id, actor="restart")
+        timeout = self._storage.setting("defaults", "walk_test_timeout_s")
+        ends_at = dt_util.utcnow() + timedelta(seconds=timeout)
+
+        @callback
+        def _timeout(_now) -> None:
+            self._hass.async_create_background_task(
+                self.async_walk_test_stop(panel_id, actor="timeout"),
+                name="kustos_walk_timeout",
+            )
+
+        self.walk_tests[panel_id] = {
+            "ends_at": ends_at.isoformat(),
+            "tested": set(),
+            "cancel": async_track_point_in_utc_time(self._hass, _timeout, ends_at),
+        }
+        self._audit("walk_test_started", {"panel_id": panel_id, "actor": actor})
+        async_dispatcher_send(self._hass, SIGNAL_PANEL_STATE, panel_id)
+
+    async def async_walk_test_stop(self, panel_id: str, actor: str) -> None:
+        info = self.walk_tests.pop(panel_id, None)
+        if info is None:
+            return
+        info["cancel"]()
+        self._audit(
+            "walk_test_ended",
+            {
+                "panel_id": panel_id,
+                "actor": actor,
+                "tested_zones": sorted(info["tested"]),
+            },
+        )
+        async_dispatcher_send(self._hass, SIGNAL_PANEL_STATE, panel_id)
 
     def zone_entity_ids(self, panel_id: str) -> list[str]:
         fsm = self.fsms.get(panel_id)
@@ -408,6 +500,7 @@ class KustosHub:
     def _apply_effects(self, panel_id: str, fx: Effects) -> None:
         for event_name, payload in fx.events:
             self._hass.bus.async_fire(event_name, payload)
+            self._audit(event_name.removeprefix("kustos_"), dict(payload))
             if event_name == EVENT_TRIGGERED:
                 fsm = self.fsms[panel_id]
                 self._hass.async_create_task(
