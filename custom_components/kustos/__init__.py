@@ -8,7 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from . import api
+from . import api, panel
 from .const import DOMAIN
 from .core.hub import KustosHub
 from .storage import KustosStorage
@@ -48,6 +48,7 @@ async def _async_get_storage(hass: HomeAssistant) -> KustosStorage:
 
         storage.panels.async_add_listener(_panels_changed)
         api.async_register(hass, storage)
+        await panel.async_register_panel(hass)
     return domain_data["storage"]
 
 

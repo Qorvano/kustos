@@ -1,13 +1,19 @@
 {
-  "domain": "kustos",
-  "name": "Kustos",
-  "codeowners": ["@Qorvano"],
+  "codeowners": [
+    "@Qorvano"
+  ],
   "config_flow": true,
-  "dependencies": ["http", "websocket_api"],
+  "dependencies": [
+    "http",
+    "panel_custom",
+    "websocket_api"
+  ],
   "documentation": "https://github.com/Qorvano/kustos",
+  "domain": "kustos",
   "integration_type": "hub",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/Qorvano/kustos/issues",
+  "name": "Kustos",
   "requirements": [],
   "single_config_entry": true,
   "version": "0.1.0"
