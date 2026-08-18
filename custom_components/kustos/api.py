@@ -18,7 +18,11 @@ from .core.auth import hash_pin
 from .schemas import (
     PANEL_CREATE_FIELDS,
     PANEL_UPDATE_FIELDS,
+    PERSON_CREATE_FIELDS,
+    PERSON_UPDATE_FIELDS,
     PIN_SCHEMA,
+    RULE_CREATE_FIELDS,
+    RULE_UPDATE_FIELDS,
     PROFILE_CREATE_FIELDS,
     PROFILE_UPDATE_FIELDS,
     USER_CREATE_FIELDS,
@@ -66,6 +70,23 @@ def async_register(hass: HomeAssistant, storage: KustosStorage) -> None:
         USER_UPDATE_FIELDS,
         admin_only=True,
     ).async_setup(hass)
+    DictStorageCollectionWebsocket(
+        storage.persons,
+        f"{DOMAIN}/persons",
+        "person",
+        PERSON_CREATE_FIELDS,
+        PERSON_UPDATE_FIELDS,
+        admin_only=True,
+    ).async_setup(hass)
+    DictStorageCollectionWebsocket(
+        storage.rules,
+        f"{DOMAIN}/rules",
+        "rule",
+        RULE_CREATE_FIELDS,
+        RULE_UPDATE_FIELDS,
+        admin_only=True,
+    ).async_setup(hass)
+    websocket_api.async_register_command(hass, ws_abort_auto_arm)
     websocket_api.async_register_command(hass, ws_user_set_pin)
     websocket_api.async_register_command(hass, ws_settings_get)
     websocket_api.async_register_command(hass, ws_settings_update)
@@ -83,6 +104,26 @@ def _hub(hass: HomeAssistant):
         if hasattr(entry, "runtime_data") and entry.runtime_data is not None:
             return entry.runtime_data.hub
     return None
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/auto_arm/abort",
+        vol.Required("rule_id"): str,
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_abort_auto_arm(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    hub = _hub(hass)
+    if hub is None:
+        connection.send_error(msg["id"], "not_loaded", "Kustos is not loaded")
+        return
+    connection.send_result(
+        msg["id"], {"aborted": hub.presence.abort_prewarn_by_id(msg["rule_id"])}
+    )
 
 
 @websocket_api.websocket_command(
@@ -233,5 +274,13 @@ def ws_state_list(
     master_state, master_mode = hub.master_state
     connection.send_result(
         msg["id"],
-        {"panels": panels, "master": {"state": master_state, "arm_mode": master_mode}},
+        {
+            "panels": panels,
+            "master": {"state": master_state, "arm_mode": master_mode},
+            "presence": hub.presence.phases(),
+            "walk_tests": {
+                panel_id: {"ends_at": info["ends_at"], "tested": sorted(info["tested"])}
+                for panel_id, info in hub.walk_tests.items()
+            },
+        },
     )

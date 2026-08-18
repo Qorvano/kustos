@@ -45,6 +45,7 @@ from .fsm import (
     PanelState,
     ZoneConfig,
 )
+from .presence import PresenceManager
 from .snapshot import SnapshotManager
 
 if TYPE_CHECKING:
@@ -67,6 +68,7 @@ class KustosHub:
         self.snapshots = SnapshotManager(hass, storage)
         self.engine = ReactionEngine(hass, storage, self.snapshots)
         self.audit = AuditLog(hass)
+        self.presence = PresenceManager(hass, storage, self)
         self._restoring = False
         # Walk test: panel_id -> {"ends_at", "tested", "cancel"}
         self.walk_tests: dict[str, dict[str, Any]] = {}
@@ -90,6 +92,7 @@ class KustosHub:
             if fsm.state is not PanelState.TRIGGERED and self.engine.has_instances(panel_id):
                 await self.engine.async_stop_panel(panel_id, restore=True)
         await self.engine.async_resume()
+        await self.presence.async_start()
         # Zone changes rebuild in place; panel add/remove is handled by the
         # config entry (reload) so entities are created/removed cleanly.
         self._config_unsub = self._storage.zones.async_add_listener(
@@ -98,6 +101,7 @@ class KustosHub:
 
     async def async_stop(self) -> None:
         # No restore here: the alarm may still be real; resume happens on boot.
+        await self.presence.async_stop()
         await self.engine.async_shutdown()
         for cancel in self._timers.values():
             cancel()
@@ -384,6 +388,9 @@ class KustosHub:
             actor = f"user:{user['name']}"
         fsm = self.fsms[panel_id]
         self._apply_effects(panel_id, fsm.disarm(actor))
+        if not actor.startswith("rule:"):
+            # Manual precedence: no rule may re-arm during the same trip.
+            self.presence.on_manual_disarm(panel_id)
         if is_duress:
             # Audit only; nothing on the bus, nothing observable (finding 1).
             self._audit(

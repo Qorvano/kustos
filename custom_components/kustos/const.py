@@ -89,6 +89,11 @@ EVENT_ARM_FAILED = f"{DOMAIN}_arm_failed"
 EVENT_ACKNOWLEDGED = f"{DOMAIN}_acknowledged"
 EVENT_ZONE_BYPASSED = f"{DOMAIN}_zone_bypassed"
 EVENT_WALK_TEST_ZONE = f"{DOMAIN}_walk_test_zone"
+EVENT_PRESENCE_PHASE = f"{DOMAIN}_presence_phase"
+EVENT_AUTO_ARM_PENDING = f"{DOMAIN}_auto_arm_pending"
+EVENT_AUTO_ARMED = f"{DOMAIN}_auto_armed"
+EVENT_AUTO_ARM_ABORTED = f"{DOMAIN}_auto_arm_aborted"
+EVENT_AUTO_DISARMED = f"{DOMAIN}_auto_disarmed"
 
 # Event/service payload keys.
 ATTR_PANEL_ID = "panel_id"

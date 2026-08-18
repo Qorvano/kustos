@@ -49,6 +49,17 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         # How many entries a single audit query returns at most.
         "query_limit": 200,
     },
+    "presence": {
+        # 500 m stammt aus der bestehenden Proximity-Logik des Users und ist
+        # im Panel sichtbar aenderbar; die Rueckkehr-Schwelle wird als
+        # Haelfte abgeleitet statt als zweite freie Zahl gepflegt.
+        "away_confirm_distance_m": 500.0,
+        # Ohne Distanzquelle gilt eine Person erst nach dieser Dauer
+        # not_home als bestaetigt abwesend (WLAN-Flattern abfangen).
+        "min_away_duration_s": 120.0,
+        # Vorwarnzeit vor dem automatischen Scharfschalten.
+        "prewarn_s": 120.0,
+    },
     "engine": {
         # Entities that came back after being unavailable during an alarm get
         # one late restore attempt within this window.
@@ -92,6 +103,15 @@ SETTINGS_SCHEMA = vol.Schema(
         ),
         vol.Required("audit"): vol.Schema(
             {vol.Required("query_limit"): vol.All(vol.Coerce(int), vol.Range(min=1, max=5000))}
+        ),
+        vol.Required("presence"): vol.Schema(
+            {
+                vol.Required("away_confirm_distance_m"): vol.All(
+                    vol.Coerce(float), vol.Range(min=1)
+                ),
+                vol.Required("min_away_duration_s"): _NON_NEGATIVE_SECONDS,
+                vol.Required("prewarn_s"): _NON_NEGATIVE_SECONDS,
+            }
         ),
         vol.Required("engine"): vol.Schema(
             {
@@ -397,3 +417,75 @@ PIN_SCHEMA = vol.All(cv.string, vol.Match(rf"^\d{{{PIN_MIN_LENGTH},}}$"))
 PERCEIVABLE_BLOCK_TYPES = frozenset(
     {"flash_lights", "lights_on", "sound", "announce_loop"}
 )
+
+
+# ---------------------------------------------------------------------------
+# Presence (M5): tracked persons and auto-arm/disarm rules
+# ---------------------------------------------------------------------------
+
+PERSON_CREATE_FIELDS = {
+    vol.Required("name"): cv.string,
+    # person.* or device_tracker.*; home/not_home evidence.
+    vol.Required("tracker_entity"): cv.entity_id,
+    # Optional distance source (proximity sensor etc.); unit read from the
+    # entity (m or km). Without it, time-based away confirmation applies.
+    # None is equivalent to absent (update flows write None to clear).
+    vol.Optional("distance_entity"): vol.Any(None, cv.entity_id),
+    vol.Optional("away_confirm_distance_m"): vol.Any(
+        None, vol.All(vol.Coerce(float), vol.Range(min=1))
+    ),
+}
+PERSON_UPDATE_FIELDS = {
+    vol.Optional("name"): cv.string,
+    vol.Optional("tracker_entity"): cv.entity_id,
+    vol.Optional("distance_entity"): vol.Any(None, cv.entity_id),
+    vol.Optional("away_confirm_distance_m"): vol.Any(
+        None, vol.All(vol.Coerce(float), vol.Range(min=1))
+    ),
+}
+PERSON_FIELDS = vol.Schema(PERSON_CREATE_FIELDS)
+
+RULE_ARM_SCHEMA = vol.Schema(
+    {
+        vol.Required("mode", default=ArmMode.AWAY): vol.Coerce(ArmMode),
+        # prewarn: announce first, arm after the delay; immediate arms at once.
+        vol.Required("execution", default="prewarn"): vol.In(["prewarn", "immediate"]),
+        vol.Optional("prewarn_s"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+    }
+)
+
+RULE_RETURN_SCHEMA = vol.Schema(
+    {
+        vol.Required("disarm", default=True): cv.boolean,
+        # arrived = physically home; returning would disarm hundreds of
+        # meters out and is deliberately not offered in M5.
+        vol.Required("fire_on", default="arrived"): vol.In(["arrived"]),
+    }
+)
+
+RULE_CREATE_FIELDS = {
+    vol.Required("name"): cv.string,
+    vol.Required("enabled", default=True): cv.boolean,
+    # Panel this rule arms/disarms; "master" cascades over all panels.
+    vol.Required("panel_id"): cv.string,
+    # None = all configured persons; otherwise explicit person ids.
+    vol.Required("persons", default=None): vol.Any(None, [cv.string]),
+    vol.Required("arm", default=dict): RULE_ARM_SCHEMA,
+    vol.Required("return_action", default=dict): RULE_RETURN_SCHEMA,
+    # Auto-disarm never runs in these panel states (critique finding 2:
+    # pending stays blocked so a burglar-opened door cannot be swallowed
+    # by a coincidentally approaching resident).
+    vol.Required(
+        "blocked_in_alarm_states", default=["triggered", "pending"]
+    ): [vol.In(["triggered", "pending", "arming"])],
+}
+RULE_UPDATE_FIELDS = {
+    vol.Optional("name"): cv.string,
+    vol.Optional("enabled"): cv.boolean,
+    vol.Optional("panel_id"): cv.string,
+    vol.Optional("persons"): vol.Any(None, [cv.string]),
+    vol.Optional("arm"): RULE_ARM_SCHEMA,
+    vol.Optional("return_action"): RULE_RETURN_SCHEMA,
+    vol.Optional("blocked_in_alarm_states"): [vol.In(["triggered", "pending", "arming"])],
+}
+RULE_FIELDS = vol.Schema(RULE_CREATE_FIELDS)

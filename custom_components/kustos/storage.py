@@ -28,7 +28,9 @@ from .const import (
 from .schemas import (
     DEFAULT_SETTINGS,
     PANEL_FIELDS,
+    PERSON_FIELDS,
     PROFILE_FIELDS,
+    RULE_FIELDS,
     SETTINGS_SCHEMA,
     USER_FIELDS,
     ZONE_FIELDS,
@@ -72,6 +74,14 @@ class UserCollection(_UlidCollection):
     CREATE_UPDATE_SCHEMA = USER_FIELDS
 
 
+class PersonCollection(_UlidCollection):
+    CREATE_UPDATE_SCHEMA = PERSON_FIELDS
+
+
+class RuleCollection(_UlidCollection):
+    CREATE_UPDATE_SCHEMA = RULE_FIELDS
+
+
 class KustosStorage:
     """Owns all Kustos stores and collections."""
 
@@ -105,6 +115,12 @@ class KustosStorage:
             hass, STORAGE_VERSION, STORAGE_KEY_PINS, atomic_writes=True, private=True
         )
         self.pins: dict[str, Any] = {}
+        self.persons = PersonCollection(
+            Store(hass, STORAGE_VERSION, "kustos.persons", atomic_writes=True)
+        )
+        self.rules = RuleCollection(
+            Store(hass, STORAGE_VERSION, "kustos.rules", atomic_writes=True)
+        )
         self.settings: dict[str, Any] = {}
         self.runtime: dict[str, Any] = {}
 
@@ -118,6 +134,8 @@ class KustosStorage:
         await self.zones.async_load()
         await self.profiles.async_load()
         await self.users.async_load()
+        await self.persons.async_load()
+        await self.rules.async_load()
         self.pins = await self._pin_store.async_load() or {}
         self.snapshots = await self._snapshot_store.async_load() or {}
         self.runtime = await self._runtime_store.async_load() or {"panels": {}}
