@@ -345,6 +345,37 @@ PROFILE_UPDATE_FIELDS = {
 }
 PROFILE_FIELDS = vol.Schema(PROFILE_CREATE_FIELDS)
 
+# ---------------------------------------------------------------------------
+# Users (M3). PINs live in a separate store, never in these documents.
+# ---------------------------------------------------------------------------
+
+USER_RIGHTS_SCHEMA = vol.Schema(
+    {
+        vol.Required("can_arm", default=True): cv.boolean,
+        vol.Required("can_disarm", default=True): cv.boolean,
+        # None = all panels; otherwise a list of permitted panel_ids.
+        vol.Required("panels", default=None): vol.Any(None, [cv.string]),
+    }
+)
+
+USER_CREATE_FIELDS = {
+    vol.Required("name"): cv.string,
+    vol.Required("enabled", default=True): cv.boolean,
+    vol.Required("rights", default=dict): USER_RIGHTS_SCHEMA,
+}
+USER_UPDATE_FIELDS = {
+    vol.Optional("name"): cv.string,
+    vol.Optional("enabled"): cv.boolean,
+    vol.Optional("rights"): USER_RIGHTS_SCHEMA,
+}
+USER_FIELDS = vol.Schema(USER_CREATE_FIELDS)
+
+# Documented baseline, not a magic number: 4 digits is the classic keypad
+# minimum; users may set longer PINs. Digits only (keypad compatibility).
+PIN_MIN_LENGTH = 4
+PIN_SCHEMA = vol.All(cv.string, vol.Match(rf"^\d{{{PIN_MIN_LENGTH},}}$"))
+
+
 # Blocks that make an alarm locally perceivable; forbidden for silent types
 # (critique finding 1: a hold-up alarm must not be observable on site).
 PERCEIVABLE_BLOCK_TYPES = frozenset(

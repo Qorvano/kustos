@@ -14,11 +14,15 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.collection import DictStorageCollectionWebsocket
 
 from .const import DOMAIN
+from .core.auth import hash_pin
 from .schemas import (
     PANEL_CREATE_FIELDS,
     PANEL_UPDATE_FIELDS,
+    PIN_SCHEMA,
     PROFILE_CREATE_FIELDS,
     PROFILE_UPDATE_FIELDS,
+    USER_CREATE_FIELDS,
+    USER_UPDATE_FIELDS,
     SETTINGS_SCHEMA,
     ZONE_CREATE_FIELDS,
     ZONE_UPDATE_FIELDS,
@@ -54,6 +58,15 @@ def async_register(hass: HomeAssistant, storage: KustosStorage) -> None:
         PROFILE_UPDATE_FIELDS,
         admin_only=True,
     ).async_setup(hass)
+    DictStorageCollectionWebsocket(
+        storage.users,
+        f"{DOMAIN}/users",
+        "user",
+        USER_CREATE_FIELDS,
+        USER_UPDATE_FIELDS,
+        admin_only=True,
+    ).async_setup(hass)
+    websocket_api.async_register_command(hass, ws_user_set_pin)
     websocket_api.async_register_command(hass, ws_settings_get)
     websocket_api.async_register_command(hass, ws_settings_update)
     websocket_api.async_register_command(hass, ws_state_list)
@@ -68,6 +81,34 @@ def _hub(hass: HomeAssistant):
         if hasattr(entry, "runtime_data") and entry.runtime_data is not None:
             return entry.runtime_data.hub
     return None
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/users/set_pin",
+        vol.Required("user_id"): str,
+        # None removes the PIN of that kind.
+        vol.Required("pin"): vol.Any(None, PIN_SCHEMA),
+        vol.Required("kind", default="normal"): vol.In(["normal", "duress"]),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_user_set_pin(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Set or remove a user PIN. Hashes only; plaintext never persists."""
+    storage = _storage(hass)
+    if not any(u["id"] == msg["user_id"] for u in storage.users.async_items()):
+        connection.send_error(msg["id"], "not_found", "unknown user")
+        return
+    pins = storage.pins.setdefault(msg["user_id"], {})
+    if msg["pin"] is None:
+        pins.pop(msg["kind"], None)
+    else:
+        pins[msg["kind"]] = hash_pin(msg["pin"])
+    await storage.async_save_pins()
+    connection.send_result(msg["id"], {"kinds": sorted(pins)})
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/settings/get"})

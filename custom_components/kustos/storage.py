@@ -17,6 +17,7 @@ from homeassistant.util import ulid as ulid_util
 
 from .const import (
     STORAGE_KEY_PANELS,
+    STORAGE_KEY_PINS,
     STORAGE_KEY_PROFILES,
     STORAGE_KEY_RUNTIME,
     STORAGE_KEY_SETTINGS,
@@ -29,6 +30,7 @@ from .schemas import (
     PANEL_FIELDS,
     PROFILE_FIELDS,
     SETTINGS_SCHEMA,
+    USER_FIELDS,
     ZONE_FIELDS,
     merge_defaults,
 )
@@ -66,6 +68,10 @@ class ProfileCollection(_UlidCollection):
     CREATE_UPDATE_SCHEMA = PROFILE_FIELDS
 
 
+class UserCollection(_UlidCollection):
+    CREATE_UPDATE_SCHEMA = USER_FIELDS
+
+
 class KustosStorage:
     """Owns all Kustos stores and collections."""
 
@@ -90,6 +96,15 @@ class KustosStorage:
             hass, STORAGE_VERSION, STORAGE_KEY_SNAPSHOTS, atomic_writes=True
         )
         self.snapshots: dict[str, Any] = {}
+        self.users = UserCollection(
+            Store(hass, STORAGE_VERSION, "kustos.users", atomic_writes=True)
+        )
+        # PIN hashes keyed by user_id, in their own store so they can never
+        # leak through collection list/subscribe responses or diagnostics.
+        self._pin_store: Store[dict[str, Any]] = Store(
+            hass, STORAGE_VERSION, STORAGE_KEY_PINS, atomic_writes=True, private=True
+        )
+        self.pins: dict[str, Any] = {}
         self.settings: dict[str, Any] = {}
         self.runtime: dict[str, Any] = {}
 
@@ -102,6 +117,8 @@ class KustosStorage:
         await self.panels.async_load()
         await self.zones.async_load()
         await self.profiles.async_load()
+        await self.users.async_load()
+        self.pins = await self._pin_store.async_load() or {}
         self.snapshots = await self._snapshot_store.async_load() or {}
         self.runtime = await self._runtime_store.async_load() or {"panels": {}}
 
@@ -112,6 +129,9 @@ class KustosStorage:
     async def async_save_runtime(self) -> None:
         """Immediate save; used for critical FSM transitions."""
         await self._runtime_store.async_save(self.runtime)
+
+    async def async_save_pins(self) -> None:
+        await self._pin_store.async_save(self.pins)
 
     async def async_save_snapshots(self) -> None:
         """Write-ahead: must complete before the first mutating command."""

@@ -7,6 +7,7 @@ from homeassistant.components.alarm_control_panel import (
     AlarmControlPanelEntity,
     AlarmControlPanelEntityFeature,
     AlarmControlPanelState,
+    CodeFormat,
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv, entity_platform
@@ -60,9 +61,6 @@ class _KustosPanelBase(AlarmControlPanelEntity):
     _attr_has_entity_name = True
     _attr_name = None
     _attr_should_poll = False
-    # Codes/PINs land in M3; until then the panels are honest about it.
-    _attr_code_arm_required = False
-    _attr_code_format = None
 
     def __init__(self, hub: KustosHub, panel_id: str) -> None:
         self._hub = hub
@@ -95,29 +93,44 @@ class _KustosPanelBase(AlarmControlPanelEntity):
             return _MODE_TO_STATE[arm_mode]
         return AlarmControlPanelState.DISARMED
 
+    def _code_required_for(self, action: str) -> bool:
+        raise NotImplementedError
+
+    @property
+    def code_format(self) -> CodeFormat | None:
+        """State-dependent (Alarmo pattern): the format for the NEXT action."""
+        if not self._hub.has_pin_users():
+            return None
+        action = "arm" if self.alarm_state == AlarmControlPanelState.DISARMED else "disarm"
+        return CodeFormat.NUMBER if self._code_required_for(action) else None
+
+    @property
+    def code_arm_required(self) -> bool:
+        return self._hub.has_pin_users() and self._code_required_for("arm")
+
     async def async_alarm_disarm(self, code: str | None = None) -> None:
-        await self._hub.async_disarm(self._panel_id, actor=self._actor())
+        await self._hub.async_disarm(self._panel_id, actor=self._actor(), code=code)
 
     async def async_alarm_arm_away(self, code: str | None = None) -> None:
-        await self._arm(ArmMode.AWAY)
+        await self._arm(ArmMode.AWAY, code)
 
     async def async_alarm_arm_home(self, code: str | None = None) -> None:
-        await self._arm(ArmMode.HOME)
+        await self._arm(ArmMode.HOME, code)
 
     async def async_alarm_arm_night(self, code: str | None = None) -> None:
-        await self._arm(ArmMode.NIGHT)
+        await self._arm(ArmMode.NIGHT, code)
 
     async def async_alarm_arm_vacation(self, code: str | None = None) -> None:
-        await self._arm(ArmMode.VACATION)
+        await self._arm(ArmMode.VACATION, code)
 
     async def async_alarm_arm_custom_bypass(self, code: str | None = None) -> None:
-        await self._arm(ArmMode.CUSTOM_BYPASS)
+        await self._arm(ArmMode.CUSTOM_BYPASS, code)
 
     async def async_acknowledge(self) -> None:
         await self._hub.async_acknowledge(self._panel_id, actor=self._actor())
 
-    async def _arm(self, mode: ArmMode) -> None:
-        await self._hub.async_arm(self._panel_id, mode, actor=self._actor())
+    async def _arm(self, mode: ArmMode, code: str | None = None) -> None:
+        await self._hub.async_arm(self._panel_id, mode, actor=self._actor(), code=code)
 
     def _actor(self) -> str:
         context = self._context
@@ -127,6 +140,9 @@ class _KustosPanelBase(AlarmControlPanelEntity):
 
 
 class KustosAreaPanel(_KustosPanelBase):
+    def _code_required_for(self, action: str) -> bool:
+        return self._hub.code_required(self._panel_id, action)
+
     def __init__(self, hub: KustosHub, panel_id: str) -> None:
         super().__init__(hub, panel_id)
         fsm = hub.fsms[panel_id]
@@ -160,6 +176,11 @@ class KustosAreaPanel(_KustosPanelBase):
 
 
 class KustosMasterPanel(_KustosPanelBase):
+    def _code_required_for(self, action: str) -> bool:
+        return any(
+            self._hub.code_required(panel_id, action) for panel_id in self._hub.fsms
+        )
+
     def __init__(self, hub: KustosHub) -> None:
         super().__init__(hub, MASTER_ID)
         features = AlarmControlPanelEntityFeature(0)

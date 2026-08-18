@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import collection
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
@@ -27,6 +28,7 @@ from ..const import (
     SIGNAL_PANEL_STATE,
     AlarmType,
 )
+from .auth import needs_rehash, verify_pin
 from .engine import ReactionEngine
 from .fsm import (
     ArmResult,
@@ -246,6 +248,61 @@ class KustosHub:
         }
 
     # ------------------------------------------------------------------
+    # Code validation (M3)
+    # ------------------------------------------------------------------
+
+    def panel_doc(self, panel_id: str) -> dict[str, Any] | None:
+        return next(
+            (p for p in self._storage.panels.async_items() if p["id"] == panel_id), None
+        )
+
+    def code_required(self, panel_id: str, action: str) -> bool:
+        doc = self.panel_doc(panel_id)
+        return bool(doc and doc["options"][f"code_{action}_required"])
+
+    def has_pin_users(self) -> bool:
+        return any(
+            self._storage.pins.get(user["id"])
+            for user in self._storage.users.async_items()
+            if user["enabled"]
+        )
+
+    def _validate_code(
+        self, panel_id: str, code: str | None, action: str
+    ) -> tuple[dict[str, Any] | None, bool]:
+        """Return (user, is_duress); raise ServiceValidationError on failure."""
+        if not self.code_required(panel_id, action):
+            return None, False
+        if not self.has_pin_users():
+            # No users configured yet: do not lock the owner out of their own
+            # system; the panel simply is not code-protected until M3 setup.
+            return None, False
+        if not code:
+            raise ServiceValidationError("Code erforderlich")
+        for user in self._storage.users.async_items():
+            if not user["enabled"]:
+                continue
+            pins = self._storage.pins.get(user["id"], {})
+            for kind in ("normal", "duress"):
+                record = pins.get(kind)
+                if record is None or not verify_pin(code, record):
+                    continue
+                rights = user["rights"]
+                if action == "arm" and not rights["can_arm"]:
+                    raise ServiceValidationError("Scharfschalten nicht erlaubt")
+                if action == "disarm" and not rights["can_disarm"]:
+                    raise ServiceValidationError("Entschärfen nicht erlaubt")
+                if rights["panels"] is not None and panel_id not in rights["panels"]:
+                    raise ServiceValidationError("Bereich nicht erlaubt")
+                if needs_rehash(record):
+                    from .auth import hash_pin  # local import avoids cycle
+
+                    pins[kind] = hash_pin(code)
+                    self._hass.async_create_task(self._storage.async_save_pins())
+                return user, kind == "duress"
+        raise ServiceValidationError("Ungültiger Code")
+
+    # ------------------------------------------------------------------
     # Commands (called by entities, services, WS API)
     # ------------------------------------------------------------------
 
@@ -256,16 +313,25 @@ class KustosHub:
         actor: str,
         force: bool = False,
         skip_delay: bool = False,
+        code: str | None = None,
     ) -> ArmResult:
         if panel_id == MASTER_ID:
             result = ArmResult(True)
             for area_panel_id in self.fsms:
                 result = await self.async_arm(
-                    area_panel_id, mode, actor, force=force, skip_delay=skip_delay
+                    area_panel_id,
+                    mode,
+                    actor,
+                    force=force,
+                    skip_delay=skip_delay,
+                    code=code,
                 )
                 if not result.ok:
                     return result
             return result
+        user, _ = self._validate_code(panel_id, code, "arm")
+        if user is not None:
+            actor = f"user:{user['name']}"
         fsm = self.fsms[panel_id]
         result, fx = fsm.arm(
             mode, self._open_zone_ids(panel_id), actor, force=force, skip_delay=skip_delay
@@ -273,13 +339,24 @@ class KustosHub:
         self._apply_effects(panel_id, fx)
         return result
 
-    async def async_disarm(self, panel_id: str, actor: str) -> None:
+    async def async_disarm(
+        self, panel_id: str, actor: str, code: str | None = None
+    ) -> None:
         if panel_id == MASTER_ID:
             for area_panel_id in self.fsms:
-                await self.async_disarm(area_panel_id, actor)
+                await self.async_disarm(area_panel_id, actor, code=code)
             return
+        user, is_duress = self._validate_code(panel_id, code, "disarm")
+        if user is not None:
+            # Deliberately identical attribution for normal and duress disarm:
+            # nothing observable may differ (critique finding 1).
+            actor = f"user:{user['name']}"
         fsm = self.fsms[panel_id]
         self._apply_effects(panel_id, fsm.disarm(actor))
+        if is_duress:
+            await self.engine.async_start(
+                panel_id, fsm.area_id, AlarmType.HOLDUP, detached=True
+            )
 
     async def async_acknowledge(self, panel_id: str, actor: str) -> None:
         if panel_id == MASTER_ID:
@@ -288,6 +365,10 @@ class KustosHub:
             return
         fsm = self.fsms[panel_id]
         self._apply_effects(panel_id, fsm.acknowledge(actor))
+        # Acknowledge also ends a running silent hold-up instance (admin act).
+        await self.engine.async_stop_panel(
+            panel_id, restore=True, include_detached=True
+        )
 
     def blocking_zones(self, panel_id: str, mode: ArmMode) -> list[str]:
         fsm = self.fsms[panel_id]

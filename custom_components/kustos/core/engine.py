@@ -50,7 +50,15 @@ class ReactionEngine:
     def _records(self) -> dict[str, dict[str, Any]]:
         return self._storage.runtime.setdefault("engine", {}).setdefault("instances", {})
 
-    async def async_start(self, panel_id: str, area_id: str | None, alarm_type: str) -> None:
+    async def async_start(
+        self,
+        panel_id: str,
+        area_id: str | None,
+        alarm_type: str,
+        detached: bool = False,
+    ) -> None:
+        """detached: runs independent of the panel FSM state (silent hold-up
+        after a duress disarm); ends only via acknowledge."""
         for record in self._records().values():
             if record["panel_id"] == panel_id and record["alarm_type"] == alarm_type:
                 return  # already running
@@ -73,6 +81,7 @@ class ReactionEngine:
                 for stage in stages
             ]
         record = {
+            "detached": detached,
             "instance_id": ulid_util.ulid_now(),
             "panel_id": panel_id,
             "area_id": area_id,
@@ -115,11 +124,19 @@ class ReactionEngine:
                 )
 
     def has_instances(self, panel_id: str) -> bool:
-        return any(r["panel_id"] == panel_id for r in self._records().values())
+        return any(
+            r["panel_id"] == panel_id and not r.get("detached")
+            for r in self._records().values()
+        )
 
-    async def async_stop_panel(self, panel_id: str, restore: bool = True) -> None:
+    async def async_stop_panel(
+        self, panel_id: str, restore: bool = True, include_detached: bool = False
+    ) -> None:
         for record in [
-            r for r in self._records().values() if r["panel_id"] == panel_id
+            r
+            for r in self._records().values()
+            if r["panel_id"] == panel_id
+            and (include_detached or not r.get("detached"))
         ]:
             await self._teardown(record, restore=restore)
 
