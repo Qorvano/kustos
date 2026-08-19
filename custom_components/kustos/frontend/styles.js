@@ -167,9 +167,12 @@ export const STYLES = `
            border-radius: 4px 4px 0 0; border-bottom: 1px solid var(--k-line);
            padding: 22px 16px 6px; min-height: 56px; }
   .field:focus-within { border-bottom: 2px solid var(--k-primary); padding-bottom: 5px; }
-  .field > label { position: absolute; top: 7px; left: 16px; font-size: 11px;
-                   color: var(--k-label); pointer-events: none; }
+  .field > label { position: absolute; top: 7px; left: 16px; right: 16px;
+                   font-size: 11px; color: var(--k-label); pointer-events: none;
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .field:focus-within > label { color: var(--k-primary); }
+  .field.disabled { opacity: .45; }
+  .field.disabled select { cursor: not-allowed; }
   .field input, .field select {
     width: 100%; border: none; outline: none; background: transparent;
     font: inherit; font-size: 16px; color: var(--primary-text-color);

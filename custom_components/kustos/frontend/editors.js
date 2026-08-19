@@ -159,13 +159,20 @@ function zoneEditor(ctx, doc) {
   const enabledModes = Object.entries(panelDoc?.modes || {})
     .filter(([, c]) => c.enabled).map(([m]) => m);
   // Alle Modi zeigen; im Bereich nicht aktivierte ausgegraut (User-Feedback).
+  const hasDisabled = ALL_MODES.some((m) => !enabledModes.includes(m));
   const roles = `<div class="form-grid">${ALL_MODES.map((m) => {
     const enabled = enabledModes.includes(m);
-    return selectField(`role-${m}`,
-      enabled ? MODE_LABELS[m] : `${MODE_LABELS[m]} (im Bereich nicht aktiviert)`,
+    return selectField(`role-${m}`, MODE_LABELS[m],
       ROLES.map((r) => [r, ROLE_LABELS[r]]), (doc.modes || {})[m] || "inactive",
       { disabled: !enabled });
-  }).join("")}</div>`;
+  }).join("")}</div>
+  ${hasDisabled ? `<p class="muted" style="margin:10px 0 0;">Ausgegraute Modi sind in diesem Bereich nicht aktiviert (Bereich bearbeiten, Karte Modi).</p>` : ""}
+  <div class="muted" style="margin-top:12px; line-height:1.8;">
+    <b>sofort</b>: löst ohne Karenz aus (Fenster, Glasbruch)<br>
+    <b>verzögert</b>: startet die Eintrittsverzögerung zum Entschärfen (Haustür)<br>
+    <b>Folgezone</b>: wie sofort, folgt aber einer bereits laufenden Eintrittsverzögerung, statt selbst auszulösen (Flur hinter der Haustür)<br>
+    <b>inaktiv</b>: in diesem Modus nicht überwacht
+  </div>`;
   const o = doc.options || {};
   return `
     ${card("Sensor", `<div class="form">
