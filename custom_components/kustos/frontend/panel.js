@@ -214,4 +214,6 @@ class KustosPanel extends HTMLElement {
   }
 }
 
-customElements.define("kustos-panel", KustosPanel);
+if (!customElements.get("kustos-panel")) {
+  customElements.define("kustos-panel", KustosPanel);
+}
