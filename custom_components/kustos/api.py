@@ -87,6 +87,7 @@ def async_register(hass: HomeAssistant, storage: KustosStorage) -> None:
         admin_only=True,
     ).async_setup(hass)
     websocket_api.async_register_command(hass, ws_abort_auto_arm)
+    websocket_api.async_register_command(hass, ws_import_alarmo)
     websocket_api.async_register_command(hass, ws_user_set_pin)
     websocket_api.async_register_command(hass, ws_settings_get)
     websocket_api.async_register_command(hass, ws_settings_update)
@@ -104,6 +105,24 @@ def _hub(hass: HomeAssistant):
         if hasattr(entry, "runtime_data") and entry.runtime_data is not None:
             return entry.runtime_data.hub
     return None
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/import/alarmo",
+        # The "data" object of .storage/alarmo_storage, pasted by the user.
+        vol.Required("data"): dict,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_import_alarmo(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    from .core.importer import async_import_alarmo
+
+    result = await async_import_alarmo(hass, _storage(hass), msg["data"])
+    connection.send_result(msg["id"], result)
 
 
 @websocket_api.websocket_command(

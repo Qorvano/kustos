@@ -229,7 +229,8 @@ ZONE_MODES_MAP_SCHEMA = vol.Schema({vol.Coerce(ArmMode): vol.Coerce(ZoneRole)})
 ZONE_CREATE_FIELDS = {
     vol.Required("entity_id"): cv.entity_id,
     vol.Required("panel_id"): cv.string,
-    vol.Optional("name"): cv.string,
+    # None is equivalent to absent (update flows write None to clear).
+    vol.Optional("name"): vol.Any(None, cv.string),
     # Which alarm type this zone raises. Types in ALWAYS_ON_ALARM_TYPES
     # are armed 24/7 regardless of panel state (derived, no extra flag).
     vol.Required("alarm_type", default=AlarmType.BURGLARY): vol.Coerce(AlarmType),
@@ -240,7 +241,7 @@ ZONE_CREATE_FIELDS = {
 ZONE_UPDATE_FIELDS = {
     vol.Optional("entity_id"): cv.entity_id,
     vol.Optional("panel_id"): cv.string,
-    vol.Optional("name"): cv.string,
+    vol.Optional("name"): vol.Any(None, cv.string),
     vol.Optional("alarm_type"): vol.Coerce(AlarmType),
     vol.Optional("modes"): ZONE_MODES_MAP_SCHEMA,
     vol.Optional("options"): ZONE_OPTIONS_SCHEMA,
