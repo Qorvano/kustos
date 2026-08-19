@@ -208,6 +208,7 @@ export function renderPersonen(ctx) {
 /* ------------------------------------------------------------------ */
 
 export function renderBetrieb(ctx) {
+  const s = ctx._data.settings;
   const walk = (ctx._data.panels || []).map((p) => {
     const info = (ctx._data.state.walk_tests || {})[p.id];
     return listRow("shield",
@@ -230,11 +231,19 @@ export function renderBetrieb(ctx) {
       ${walk ? `<div class="rows">${walk}</div>` : `<div class="empty">Keine Bereiche.</div>`}</div>
     <div class="card"><div class="card-header">Einstellungen
         <span class="hint">zentrale Defaults, wirken sofort</span></div>
-      <div class="card-content">
-        <textarea class="jsonbox" id="settings-json">${esc(JSON.stringify(ctx._data.settings, null, 2))}</textarea>
+      <div class="rows">
+        ${listRow("cog", "Standard-Zeiten",
+          `Exit ${s.defaults.exit_delay_s} s | Entry ${s.defaults.entry_delay_s} s | Alarmdauer ${
+            s.defaults.trigger_time_s} s | Walk-Test ${s.defaults.walk_test_timeout_s} s`)}
+        ${listRow("cog", "Anwesenheit",
+          `Weg-Schwelle ${s.presence.away_confirm_distance_m} m | Mindest-Abwesenheit ${
+            s.presence.min_away_duration_s} s | Vorwarnzeit ${s.presence.prewarn_s} s`)}
+        ${listRow("cog", "Sicherheit",
+          `Quittierungspflicht ${s.security.require_explicit_ack ? "an" : "aus"} | Entschärfen quittiert ${
+            s.security.disarm_acknowledges ? "mit" : "nicht"}`)}
       </div>
       <div class="card-actions">
-        <button class="btn accent" data-action="save-settings">${icon("save",18)} Speichern</button>
+        <button class="btn" data-action="edit-settings">${icon("pencil",18)} Bearbeiten</button>
       </div></div>
     <div class="card"><div class="card-header">Protokoll
         <span class="hint">${ctx._data.audit?.month || ""}</span></div>

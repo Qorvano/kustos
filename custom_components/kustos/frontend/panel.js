@@ -433,14 +433,53 @@ class KustosPanel extends HTMLElement {
     }
 
     // Einstellungen
+    if (a === "edit-settings") {
+      this._edit = { kind: "settings", draft: structuredClone(this._data.settings) };
+      return this._render();
+    }
+    if (a === "prio-up" || a === "prio-down") {
+      this._syncSettingsDraft();
+      const list = this._edit.draft.engine.alarm_type_priority;
+      const i = Number(ds.i);
+      const j = a === "prio-up" ? i - 1 : i + 1;
+      [list[i], list[j]] = [list[j], list[i]];
+      return this._render();
+    }
     if (a === "save-settings") {
-      let parsed;
-      try { parsed = JSON.parse(this._val("settings-json")); }
-      catch (err) { alert("Kein gültiges JSON: " + err.message); return; }
-      const res = await this._ws("kustos/settings/update", { settings: parsed });
-      if (res.ok) this._refresh();
+      this._syncSettingsDraft();
+      const res = await this._ws("kustos/settings/update", { settings: this._edit.draft });
+      if (res.ok) { this._edit = null; this._refresh(); }
       return;
     }
+  }
+
+  _syncSettingsDraft() {
+    const d = this._edit?.draft;
+    if (!d) return;
+    const set = (path, id) => {
+      const v = this._num(id);
+      if (v !== null) {
+        const keys = path.split(".");
+        let node = d;
+        while (keys.length > 1) node = node[keys.shift()];
+        node[keys[0]] = v;
+      }
+    };
+    set("defaults.exit_delay_s", "s-exit");
+    set("defaults.entry_delay_s", "s-entry");
+    set("defaults.trigger_time_s", "s-trigger");
+    set("defaults.debounce_s", "s-debounce");
+    set("defaults.walk_test_timeout_s", "s-walk");
+    set("presence.away_confirm_distance_m", "s-away");
+    set("presence.min_away_duration_s", "s-minaway");
+    set("presence.prewarn_s", "s-prewarn");
+    set("engine.restore_retry_window_s", "s-retry");
+    set("audit.query_limit", "s-audit");
+    set("storage.runtime_save_delay_s", "s-save");
+    if (this._q("s-ack")) d.security.require_explicit_ack = this._chk("s-ack");
+    if (this._q("s-disack")) d.security.disarm_acknowledges = this._chk("s-disack");
+    const ls = [...this.shadowRoot.querySelectorAll(".ls-type:checked")].map((x) => x.value);
+    if (this._q("s-exit")) d.engine.life_safety_unlock_types = ls;
   }
 
   _syncProfileDraft() {

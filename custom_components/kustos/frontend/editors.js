@@ -22,6 +22,7 @@ export const BLOCK_DEFAULTS = {
 };
 
 export const EDITOR_TITLES = {
+  settings: ["Einstellungen", "Einstellungen"],
   panel: ["Neuer Bereich", "Bereich bearbeiten"],
   zone: ["Neue Zone", "Zone bearbeiten"],
   profile: ["Neues Profil", "Profil bearbeiten"],
@@ -109,7 +110,7 @@ export function renderEditor(ctx) {
   const { kind, draft } = ctx._edit;
   const body = {
     panel: panelEditor, zone: zoneEditor, profile: profileEditor,
-    member: memberEditor, rule: ruleEditor,
+    member: memberEditor, rule: ruleEditor, settings: settingsEditor,
   }[kind](ctx, draft);
   return `<div class="cards">${body}</div>
     <button class="fab" data-action="save-${kind}" data-id="${draft.id || ""}"
@@ -290,4 +291,46 @@ function ruleEditor(ctx, doc) {
       "nur nach bestätigter Abwesenheit im selben Trip; nie während Alarm oder Eintrittsverzögerung"))}
     ${card("Personen", `${switchRow("r-allpersons", "Alle Personen", doc.persons == null)}
       <div style="margin-top:8px;">${personChecks || '<span class="muted">Keine HA-Personen gefunden.</span>'}</div>`)}`;
+}
+
+
+function settingsEditor(ctx, draft) {
+  const d = draft;
+  const prio = d.engine.alarm_type_priority.map((t, i) => `
+    <div class="row"><span class="body"><div class="primary">${i + 1}. ${ALARM_TYPE_LABELS[t] || t}</div></span>
+      <span class="meta">
+        <button class="icon-btn" title="Hoch" data-action="prio-up" data-i="${i}" ${i === 0 ? "disabled" : ""}>${icon("arrow-up", 20)}</button>
+        <button class="icon-btn" title="Runter" data-action="prio-down" data-i="${i}" ${i === d.engine.alarm_type_priority.length - 1 ? "disabled" : ""}>${icon("arrow-down", 20)}</button>
+      </span></div>`).join("");
+  const lifeSafety = ALARM_TYPES.map((t) =>
+    `<label style="display:inline-flex;align-items:center;gap:6px;margin:4px 12px 4px 0;">
+      <input type="checkbox" class="ls-type" value="${t}"
+        ${d.engine.life_safety_unlock_types.includes(t) ? "checked" : ""}> ${ALARM_TYPE_LABELS[t]}
+    </label>`).join("");
+  return `
+    ${card("Standard-Zeiten", `<div class="form-grid">
+      ${numField("s-exit", "Exit-Delay s", d.defaults.exit_delay_s)}
+      ${numField("s-entry", "Entry-Delay s", d.defaults.entry_delay_s)}
+      ${numField("s-trigger", "Alarmdauer s (0 = bis Quittierung)", d.defaults.trigger_time_s)}
+      ${numField("s-debounce", "Kontakt-Entprellung s", d.defaults.debounce_s)}
+      ${numField("s-walk", "Walk-Test-Timeout s", d.defaults.walk_test_timeout_s)}
+    </div>`, "gelten, wo ein Bereich nichts Eigenes setzt")}
+    ${card("Sicherheit", `
+      ${switchRow("s-ack", "Alarme müssen quittiert werden", d.security.require_explicit_ack,
+        "Alarmspeicher bleibt bis zur Quittierung sichtbar")}
+      ${switchRow("s-disack", "Entschärfen quittiert automatisch mit", d.security.disarm_acknowledges)}`)}
+    ${card("Anwesenheit", `<div class="form-grid">
+      ${numField("s-away", "Weg-Schwelle m", d.presence.away_confirm_distance_m)}
+      ${numField("s-minaway", "Mindest-Abwesenheit s (ohne Distanzquelle)", d.presence.min_away_duration_s)}
+      ${numField("s-prewarn", "Vorwarnzeit vor Auto-Scharf s", d.presence.prewarn_s)}
+    </div>`, "pro Person und Regel übersteuerbar")}
+    ${card("Alarmtyp-Priorität", `<div class="rows">${prio}</div>`,
+      "wer bei Konflikten dieselben Geräte gewinnt")}
+    ${card("Türen öffnen erlaubt bei", lifeSafety,
+      "Schloss-Baustein 'öffnen' wirkt nur für diese Alarmtypen")}
+    ${card("Erweitert", `<div class="form-grid">
+      ${numField("s-retry", "Restore-Nachversuch-Fenster s", d.engine.restore_retry_window_s)}
+      ${numField("s-audit", "Protokoll-Abfragelimit", d.audit.query_limit)}
+      ${numField("s-save", "Laufzeit-Speicherverzögerung s", d.storage.runtime_save_delay_s)}
+    </div>`)}`;
 }
