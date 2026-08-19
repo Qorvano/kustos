@@ -177,6 +177,57 @@ class KustosPanel extends HTMLElement {
     }
   }
 
+  _promptCode(title, subtitle = "", allowEmpty = false) {
+    return new Promise((resolve) => {
+      let value = "";
+      const ov = document.createElement("div");
+      ov.className = "overlay";
+      ov.innerHTML = `<div class="picker-dialog" style="width:min(360px,calc(100vw - 32px));">
+        <div class="picker-title" style="text-align:center;">${esc(title)}</div>
+        ${subtitle ? `<div class="code-sub">${esc(subtitle)}</div>` : ""}
+        <div class="code-display"> </div>
+        <div class="keypad">
+          ${[1,2,3,4,5,6,7,8,9].map((d) => `<button class="key" data-d="${d}">${d}</button>`).join("")}
+          <button class="key action" data-k="clear">Löschen</button>
+          <button class="key" data-d="0">0</button>
+          <button class="key action" data-k="ok">OK</button>
+        </div>
+        <div class="picker-actions"><button class="btn" data-k="cancel">Abbrechen</button></div>
+      </div>`;
+      const display = ov.querySelector(".code-display");
+      const okBtn = ov.querySelector('[data-k="ok"]');
+      const update = () => {
+        display.textContent = "●".repeat(value.length) || " ";
+        okBtn.disabled = !allowEmpty && value.length === 0;
+        okBtn.style.opacity = okBtn.disabled ? ".4" : "1";
+      };
+      const finish = (result) => {
+        window.removeEventListener("keydown", onKey, true);
+        ov.remove();
+        resolve(result);
+      };
+      const onKey = (ev) => {
+        if (/^[0-9]$/.test(ev.key)) { value += ev.key; update(); }
+        else if (ev.key === "Backspace") { value = value.slice(0, -1); update(); }
+        else if (ev.key === "Enter") { if (allowEmpty || value) finish(value); }
+        else if (ev.key === "Escape") { finish(null); }
+        else return;
+        ev.preventDefault();
+        ev.stopPropagation();
+      };
+      window.addEventListener("keydown", onKey, true);
+      for (const key of ov.querySelectorAll("[data-d]")) {
+        key.onclick = () => { value += key.dataset.d; update(); };
+      }
+      ov.querySelector('[data-k="clear"]').onclick = () => { value = ""; update(); };
+      okBtn.onclick = () => { if (allowEmpty || value) finish(value); };
+      ov.querySelector('[data-k="cancel"]').onclick = () => finish(null);
+      ov.onclick = (ev) => { if (ev.target === ov) finish(null); };
+      update();
+      this.shadowRoot.appendChild(ov);
+    });
+  }
+
   _confirmDiscard() {
     const ov = document.createElement("div");
     ov.className = "overlay";
@@ -548,9 +599,13 @@ class KustosPanel extends HTMLElement {
       return;
     }
     if (a === "set-pin") {
-      const pin = prompt(ds.kind === "duress"
-        ? "Duress-PIN (nur Ziffern, min. 4). Entschärft normal und alarmiert still. Leer = entfernen:"
-        : "PIN (nur Ziffern, min. 4). Leer = entfernen:");
+      const pin = await this._promptCode(
+        ds.kind === "duress" ? "Duress-PIN setzen" : "PIN setzen",
+        ds.kind === "duress"
+          ? "Entschärft nach außen normal und alarmiert still. Mindestens 4 Ziffern; OK ohne Eingabe entfernt die PIN."
+          : "Mindestens 4 Ziffern; OK ohne Eingabe entfernt die PIN.",
+        true,
+      );
       if (pin === null) return;
       await this._ws("kustos/users/set_pin", { user_id: ds.id, pin: pin || null, kind: ds.kind });
       return this._refresh();
@@ -685,7 +740,7 @@ class KustosPanel extends HTMLElement {
     const data = { entity_id: entityId };
     const st = this._hass.states[entityId];
     if (st && st.attributes.code_format) {
-      const code = prompt("Code:");
+      const code = await this._promptCode("Code eingeben");
       if (code === null) return;
       data.code = code;
     }

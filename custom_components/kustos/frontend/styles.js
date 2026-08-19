@@ -263,4 +263,17 @@ export const PICKER_STYLES = `
     width: 20px; height: 20px; border-radius: 50%; display: inline-flex;
     align-items: center; justify-content: center; color: inherit; }
   .chip-item .chip-x:hover { background: color-mix(in srgb, currentColor 15%, transparent); }
+  .code-sub { padding: 0 24px; text-align: center; color: var(--k-secondary-text);
+    font-size: 13px; line-height: 1.4; }
+  .code-display { text-align: center; font-size: 26px; letter-spacing: 10px;
+    min-height: 40px; padding: 14px 16px 6px; color: var(--primary-text-color); }
+  .keypad { display: grid; grid-template-columns: repeat(3, 76px); gap: 10px;
+    justify-content: center; padding: 8px 16px 20px; }
+  .key { height: 60px; border-radius: 9999px; border: 1px solid var(--k-divider);
+    background: var(--k-fill); color: var(--primary-text-color); cursor: pointer;
+    font: inherit; font-size: 20px; display: flex; align-items: center;
+    justify-content: center; }
+  .key:hover { background: color-mix(in srgb, var(--k-primary) 12%, var(--k-fill)); }
+  .key.action { font-size: 14px; font-weight: 500; color: var(--k-primary);
+    background: none; border: none; }
 `;
