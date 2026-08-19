@@ -115,9 +115,13 @@ export function renderEditor(ctx) {
     group: groupEditor,
   }[kind](ctx, draft);
   return `<div class="cards">${body}</div>
-    <button class="fab" data-action="save-${kind}" data-id="${draft.id || ""}"
-      ${ctx._edit.panelId ? `data-panel="${ctx._edit.panelId}"` : ""}>
-      ${icon("save", 20)} Speichern</button>`;
+    <div class="fab-row">
+      <button class="fab-secondary ${ctx._dirty ? "" : "hidden"}" data-action="discard">
+        ${icon("close", 20)} Verwerfen</button>
+      <button class="fab" data-action="save-${kind}" data-id="${draft.id || ""}"
+        ${ctx._edit.panelId ? `data-panel="${ctx._edit.panelId}"` : ""}>
+        ${icon("save", 20)} Speichern</button>
+    </div>`;
 }
 
 function panelEditor(ctx, doc) {

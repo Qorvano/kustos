@@ -24,6 +24,7 @@ class KustosPanel extends HTMLElement {
     this._tab = "leitstand";
     this._data = {};
     this._edit = null;
+    this._dirty = false;
     this._hass = null;
     this._tick = null;
     this._unsubs = [];
@@ -157,7 +158,51 @@ class KustosPanel extends HTMLElement {
     this.shadowRoot.innerHTML = `<style>${STYLES}${PICKER_STYLES}</style>${toolbar}${body}`;
     this._bindActions(this.shadowRoot);
     this._wireZoneTypeHint();
+    this._bindDirtyTracking();
     this._updateCountdowns();
+  }
+
+  _markDirty() {
+    if (this._dirty || !this._edit) return;
+    this._dirty = true;
+    const discard = this.shadowRoot.querySelector('[data-action="discard"]');
+    if (discard) discard.classList.remove("hidden");
+  }
+
+  _bindDirtyTracking() {
+    if (!this._edit) return;
+    for (const el of this.shadowRoot.querySelectorAll("input, select, textarea")) {
+      el.addEventListener("input", () => this._markDirty());
+      el.addEventListener("change", () => this._markDirty());
+    }
+  }
+
+  _confirmDiscard() {
+    const ov = document.createElement("div");
+    ov.className = "overlay";
+    ov.innerHTML = `<div class="picker-dialog">
+      <div class="picker-title">Ungespeicherte Änderungen</div>
+      <div class="confirm-text muted">Möchtest du die Änderungen speichern oder verwerfen?</div>
+      <div class="picker-actions">
+        <button class="btn" data-x="stay">Weiter bearbeiten</button>
+        <button class="btn danger" data-x="discard">Verwerfen</button>
+        <button class="btn accent" data-x="save">Speichern</button>
+      </div></div>`;
+    ov.querySelector('[data-x="stay"]').onclick = () => ov.remove();
+    ov.onclick = (ev) => { if (ev.target === ov) ov.remove(); };
+    ov.querySelector('[data-x="discard"]').onclick = () => {
+      ov.remove();
+      this._edit = null; this._dirty = false; this._refresh();
+    };
+    ov.querySelector('[data-x="save"]').onclick = async () => {
+      ov.remove();
+      const { kind, draft, panelId } = this._edit;
+      await this._onAction({
+        action: `save-${kind}`, id: draft.id || "", panel: panelId,
+      });
+      // Bei Validierungsfehler bleibt der Editor offen (save schliesst nur bei ok).
+    };
+    this.shadowRoot.appendChild(ov);
   }
 
   _wireZoneTypeHint() {
@@ -218,6 +263,7 @@ class KustosPanel extends HTMLElement {
 
   _updatePickerDisplay(ds, values) {
     const input = this._q(ds.input);
+    if (input.value !== values.join(",")) this._markDirty();
     input.value = values.join(",");
     const display = this._q(ds.input + "-display");
     if (display) {
@@ -287,7 +333,12 @@ class KustosPanel extends HTMLElement {
   async _onAction(ds) {
     const a = ds.action;
     if (a === "tab") { this._tab = ds.tab; this._edit = null; this._render(); return; }
-    if (a === "cancel") { this._edit = null; this._refresh(); return; }
+    if (a.startsWith("new-") || a.startsWith("edit-")) this._dirty = false;
+    if (a === "cancel") {
+      if (this._edit && this._dirty) return this._confirmDiscard();
+      this._edit = null; this._dirty = false; this._refresh(); return;
+    }
+    if (a === "discard") { this._edit = null; this._dirty = false; this._refresh(); return; }
     if (a === "service") return this._service(ds.service, ds.panel);
     if (a === "pick") return this._openPicker(ds);
     if (a === "walk") {
@@ -331,7 +382,7 @@ class KustosPanel extends HTMLElement {
       const res = ds.id
         ? await this._ws("kustos/panels/update", { panel_id: ds.id, ...payload })
         : await this._ws("kustos/panels/create", payload);
-      if (res.ok) { this._edit = null; this._refresh(); }
+      if (res.ok) { this._edit = null; this._dirty = false; this._refresh(); }
       return;
     }
 
@@ -364,7 +415,7 @@ class KustosPanel extends HTMLElement {
       const res = ds.id
         ? await this._ws("kustos/zones/update", { zone_id: ds.id, ...payload })
         : await this._ws("kustos/zones/create", payload);
-      if (res.ok) { this._edit = null; this._refresh(); }
+      if (res.ok) { this._edit = null; this._dirty = false; this._refresh(); }
       return;
     }
 
@@ -375,22 +426,22 @@ class KustosPanel extends HTMLElement {
       if (!confirm("Profil löschen?")) return;
       await this._ws("kustos/profiles/delete", { profile_id: ds.id }); return this._refresh();
     }
-    if (a === "add-stage") { this._syncProfileDraft(); this._edit.draft.stages.push({ duration_s: null, blocks: [] }); return this._render(); }
-    if (a === "del-stage") { this._syncProfileDraft(); this._edit.draft.stages.splice(Number(ds.i), 1); return this._render(); }
+    if (a === "add-stage") { this._dirty = true; this._syncProfileDraft(); this._edit.draft.stages.push({ duration_s: null, blocks: [] }); return this._render(); }
+    if (a === "del-stage") { this._dirty = true; this._syncProfileDraft(); this._edit.draft.stages.splice(Number(ds.i), 1); return this._render(); }
     if (a === "add-block") {
       this._syncProfileDraft();
       const type = this._val(`stage-${ds.i}-newblock`);
       this._edit.draft.stages[Number(ds.i)].blocks.push(structuredClone(BLOCK_DEFAULTS[type]));
       return this._render();
     }
-    if (a === "del-block") { this._syncProfileDraft(); this._edit.draft.stages[Number(ds.i)].blocks.splice(Number(ds.j), 1); return this._render(); }
+    if (a === "del-block") { this._dirty = true; this._syncProfileDraft(); this._edit.draft.stages[Number(ds.i)].blocks.splice(Number(ds.j), 1); return this._render(); }
     if (a === "save-profile") {
       this._syncProfileDraft();
       const payload = { name: this._val("p-name"), stages: this._edit.draft.stages };
       const res = ds.id
         ? await this._ws("kustos/profiles/update", { profile_id: ds.id, ...payload })
         : await this._ws("kustos/profiles/create", payload);
-      if (res.ok) { this._edit = null; this._refresh(); }
+      if (res.ok) { this._edit = null; this._dirty = false; this._refresh(); }
       return;
     }
 
@@ -413,7 +464,7 @@ class KustosPanel extends HTMLElement {
       const res = ds.id
         ? await this._ws("kustos/groups/update", { group_id: ds.id, ...payload })
         : await this._ws("kustos/groups/create", payload);
-      if (res.ok) { this._edit = null; this._refresh(); }
+      if (res.ok) { this._edit = null; this._dirty = false; this._refresh(); }
       return;
     }
 
@@ -476,7 +527,7 @@ class KustosPanel extends HTMLElement {
       const res = ds.id
         ? await this._ws("kustos/rules/update", { rule_id: ds.id, ...payload })
         : await this._ws("kustos/rules/create", payload);
-      if (res.ok) { this._edit = null; this._refresh(); }
+      if (res.ok) { this._edit = null; this._dirty = false; this._refresh(); }
       return;
     }
 
@@ -486,6 +537,7 @@ class KustosPanel extends HTMLElement {
       return this._render();
     }
     if (a === "prio-up" || a === "prio-down") {
+      this._dirty = true;
       this._syncSettingsDraft();
       const list = this._edit.draft.engine.alarm_type_priority;
       const i = Number(ds.i);
@@ -496,7 +548,7 @@ class KustosPanel extends HTMLElement {
     if (a === "save-settings") {
       this._syncSettingsDraft();
       const res = await this._ws("kustos/settings/update", { settings: this._edit.draft });
-      if (res.ok) { this._edit = null; this._refresh(); }
+      if (res.ok) { this._edit = null; this._dirty = false; this._refresh(); }
       return;
     }
   }

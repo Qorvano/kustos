@@ -202,6 +202,18 @@ export const STYLES = `
   .switch input:checked + .track { background: var(--k-primary); border-color: var(--k-primary); }
   .switch input:checked + .track::after { left: 25px; }
 
+  .fab-row { position: fixed; right: calc(24px + env(safe-area-inset-right));
+    bottom: calc(24px + env(safe-area-inset-bottom)); z-index: 5;
+    display: flex; gap: 12px; }
+  .fab-row .fab { position: static; right: auto; bottom: auto; }
+  .fab-secondary { height: 48px; padding: 0 20px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px;
+    border-radius: 9999px; font: inherit; font-size: 14px; font-weight: 500;
+    background: var(--card-background-color, #fff); color: var(--primary-text-color);
+    border: 1px solid var(--k-divider);
+    box-shadow: var(--ha-box-shadow-l, 0 6px 20px rgba(0,0,0,.3)); }
+  .hidden { display: none; }
+  .confirm-text { padding: 8px 16px 16px; line-height: 1.5; }
   .muted { color: var(--k-secondary-text); font-size: 13px; }
   .section-label { font-size: 14px; font-weight: 500; color: var(--k-secondary-text);
                    margin: 8px 0 4px; }
