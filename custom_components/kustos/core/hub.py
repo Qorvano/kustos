@@ -71,6 +71,14 @@ class KustosHub:
         self._trip_history: dict[tuple[str, str], list[Any]] = {}
         self.snapshots = SnapshotManager(hass, storage)
         self.engine = ReactionEngine(hass, storage, self.snapshots)
+        self.engine.title_lookup = self.panel_title
+        # Live FSM data for message placeholders: the persisted runtime
+        # snapshot may lag behind eager-started reaction tasks.
+        self.engine.panel_state_lookup = (
+            lambda panel_id: self.fsms[panel_id].to_dict()
+            if panel_id in self.fsms
+            else self._storage.runtime.get("panels", {}).get(panel_id, {})
+        )
         self.audit = AuditLog(hass)
         self.presence = PresenceManager(hass, storage, self)
         self._restoring = False
@@ -102,6 +110,10 @@ class KustosHub:
         self._person_added_unsub = async_track_state_added_domain(
             self._hass, "person", self._on_person_added
         )
+        # Acknowledge button in push notifications (companion app).
+        self._notify_action_unsub = self._hass.bus.async_listen(
+            "mobile_app_notification_action", self._on_notification_action
+        )
         await self.presence.async_start()
         # Zone changes rebuild in place; panel add/remove is handled by the
         # config entry (reload) so entities are created/removed cleanly.
@@ -125,6 +137,16 @@ class KustosHub:
         if getattr(self, "_person_added_unsub", None):
             self._person_added_unsub()
             self._person_added_unsub = None
+        if getattr(self, "_notify_action_unsub", None):
+            self._notify_action_unsub()
+            self._notify_action_unsub = None
+
+    async def _on_notification_action(self, event: Event) -> None:
+        action = event.data.get("action") or ""
+        if action.startswith("KUSTOS_ACK_"):
+            panel_id = action.removeprefix("KUSTOS_ACK_")
+            if panel_id in self.fsms:
+                await self.async_acknowledge(panel_id, actor="push")
 
     async def _on_person_added(self, event: Event) -> None:
         await self.async_sync_ha_persons()

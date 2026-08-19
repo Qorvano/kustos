@@ -337,3 +337,51 @@ async def test_resume_after_reload_continues_and_restores(hass, hass_storage):
     await hass.async_block_till_done()
     restore_calls = [c for c in turn_on if "rgb_color" not in c.data]
     assert restore_calls and restore_calls[-1].data["brightness"] == 99
+
+
+async def test_notify_multi_target_placeholders_critical_and_ack(hass):
+    """Push an mehrere Ziele, Platzhalter gefuellt, kritisch, Quittieren-Knopf."""
+    entry, panel_id = await _setup(
+        hass,
+        [
+            {
+                "duration_s": None,
+                "blocks": [
+                    {
+                        "type": "notify",
+                        "services": ["notify.handy_dustin", "notify.handy_petra"],
+                        "title": "Alarm in {bereich}",
+                        "message": "{alarmtyp}: {sensoren}",
+                        "critical": True,
+                        "ack_action": True,
+                    }
+                ],
+            }
+        ],
+    )
+    n1 = async_mock_service(hass, "notify", "handy_dustin")
+    n2 = async_mock_service(hass, "notify", "handy_petra")
+    await _arm_and_trip(hass)
+    await asyncio.sleep(0.1)
+    await hass.async_block_till_done()
+
+    assert n1 and n2, "beide Ziele muessen beliefert werden"
+    call = n1[0].data
+    assert "Einbruch" in call["message"]
+    assert ZONE in call["message"] or "kustos_zone" in call["message"]
+    assert "test" in call["title"]  # {bereich} = Panel-Titel (custom/area)
+    assert call["data"]["push"]["sound"]["critical"] == 1
+    assert call["data"]["priority"] == "high"
+    action = call["data"]["actions"][0]
+    assert action["title"] == "Quittieren"
+
+    # Quittieren-Knopf gedrueckt: Alarmspeicher wird geleert.
+    panel = _panel_entity(hass)
+    await hass.services.async_call(
+        "alarm_control_panel", "alarm_disarm", {"entity_id": panel}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(panel).attributes["alarm_memory"]
+    hass.bus.async_fire("mobile_app_notification_action", {"action": action["action"]})
+    await hass.async_block_till_done()
+    assert hass.states.get(panel).attributes["alarm_memory"] == []

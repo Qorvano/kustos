@@ -260,9 +260,15 @@ class KustosPanel extends HTMLElement {
     }
     if (ds.kind === "service") {
       const notify = Object.keys((this._hass.services || {}).notify || {})
+        .filter((s) => s !== "send_message" && s !== "persistent_notification")
         .map((s) => "notify." + s);
-      return [...notify, "persistent_notification.create"]
-        .map((v) => ({ value: v, primary: v, secondary: "" }));
+      const label = (v) => v.startsWith("notify.mobile_app_")
+        ? "Handy: " + v.slice("notify.mobile_app_".length).replace(/_/g, " ")
+        : v;
+      return [...notify.map((v) => ({ value: v, primary: label(v), secondary: v })),
+        { value: "persistent_notification.create",
+          primary: "HA-Oberfläche (Bildschirm-Meldung)",
+          secondary: "persistent_notification.create" }];
     }
     const domains = (ds.domains || "").split(",").filter(Boolean);
     return Object.keys(this._hass.states)
@@ -645,7 +651,12 @@ class KustosPanel extends HTMLElement {
           case "announce_loop":
             txtF("notify_service"); txtF("message"); numF("interval_s");
             listF("media_targets"); numF("volume_pct"); numF("volume_fallback_pct"); break;
-          case "notify": txtF("service"); txtF("title"); txtF("message"); break;
+          case "notify":
+            listF("services"); txtF("title"); txtF("message");
+            delete b.service;  // Legacy-Feld nach Bearbeitung aufraeumen
+            if (this._q(id("critical"))) b.critical = this._chk(id("critical"));
+            if (this._q(id("ack"))) b.ack_action = this._chk(id("ack"));
+            break;
           case "lock": listF("targets"); if (this._q(id("action"))) b.action = this._val(id("action")); break;
         }
       });

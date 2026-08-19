@@ -31,6 +31,13 @@ _LOGGER = logging.getLogger(__name__)
 
 _COLOR_MODES = {"hs", "xy", "rgb", "rgbw", "rgbww"}
 
+# User-facing German labels for message placeholders (i18n later).
+_ALARM_TYPE_DE = {
+    "burglary": "Einbruch", "fire": "Feuer", "water": "Wasser", "co": "CO",
+    "tamper": "Sabotage", "holdup": "Überfall", "panic": "Panik",
+    "technical": "Technischer Alarm",
+}
+
 
 class ReactionEngine:
     def __init__(
@@ -40,6 +47,11 @@ class ReactionEngine:
         self._storage = storage
         self._snapshots = snapshots
         self._tasks: dict[str, asyncio.Task] = {}
+        # Injected by the hub (avoids a circular reference at construction).
+        self.title_lookup = lambda panel_id: panel_id
+        self.panel_state_lookup = lambda panel_id: self._storage.runtime.get(
+            "panels", {}
+        ).get(panel_id, {})
         self._block_tasks: dict[str, list[asyncio.Task]] = {}
         self._claims: dict[str, str] = {}  # entity_id -> instance_id
 
@@ -378,6 +390,27 @@ class ReactionEngine:
                 if state is not None and state.state == "on":
                     await self._call(domain, "turn_off", {"entity_id": target})
 
+    def _render_text(self, record: dict[str, Any], text: str) -> str:
+        """Fill {bereich}, {alarmtyp}, {sensoren}, {zeit} from the live alarm."""
+        if "{" not in text:
+            return text
+        runtime = self.panel_state_lookup(record["panel_id"])
+        sensor_names = []
+        zones_by_id = {z["id"]: z for z in self._storage.zones.async_items()}
+        for entry in runtime.get("alarm_memory", []):
+            zone = zones_by_id.get(entry.get("zone_id"))
+            state = self._hass.states.get(entry.get("entity_id", ""))
+            friendly = state.attributes.get("friendly_name") if state else None
+            sensor_names.append(
+                (zone or {}).get("name") or friendly or entry.get("entity_id", "?")
+            )
+        return (
+            text.replace("{bereich}", str(self.title_lookup(record["panel_id"])))
+            .replace("{alarmtyp}", _ALARM_TYPE_DE.get(record["alarm_type"], record["alarm_type"]))
+            .replace("{sensoren}", ", ".join(sensor_names) or "unbekannt")
+            .replace("{zeit}", dt_util.now().strftime("%H:%M"))
+        )
+
     async def _block_announce_loop(self, record: dict[str, Any], block: dict[str, Any]) -> None:
         await self._snapshots.ensure(block["media_targets"], record["instance_id"])
         if block.get("volume_pct") is not None:
@@ -388,17 +421,44 @@ class ReactionEngine:
                     {"entity_id": target, "volume_level": block["volume_pct"] / 100},
                 )
         domain, service = block["notify_service"].split(".", 1)
-        payload = {"message": block["message"], **block.get("data", {})}
         while True:
+            payload = {
+                "message": self._render_text(record, block["message"]),
+                **block.get("data", {}),
+            }
             await self._call(domain, service, payload)
             await asyncio.sleep(block["interval_s"])
 
     async def _block_notify(self, record: dict[str, Any], block: dict[str, Any]) -> None:
-        domain, service = block["service"].split(".", 1)
-        payload: dict[str, Any] = {"message": block["message"], **block.get("data", {})}
+        services = list(block.get("services") or [])
+        if block.get("service"):  # legacy single-service documents
+            services.append(block["service"])
+        data: dict[str, Any] = dict(block.get("data", {}))
+        if block.get("critical"):
+            # Cross-platform critical delivery; foreign keys are ignored by
+            # the respective other platform.
+            data.setdefault("push", {}).setdefault(
+                "sound", {"name": "default", "critical": 1, "volume": 1.0}
+            )
+            data.setdefault("ttl", 0)
+            data.setdefault("priority", "high")
+        if block.get("ack_action"):
+            data.setdefault("actions", []).append(
+                {
+                    "action": f"KUSTOS_ACK_{record['panel_id']}",
+                    "title": "Quittieren",
+                }
+            )
+        payload: dict[str, Any] = {
+            "message": self._render_text(record, block["message"]),
+        }
+        if data:
+            payload["data"] = data
         if block.get("title"):
-            payload["title"] = block["title"]
-        await self._call(domain, service, payload)
+            payload["title"] = self._render_text(record, block["title"])
+        for target in services:
+            domain, service = target.split(".", 1)
+            await self._call(domain, service, payload)
 
     async def _block_lock(self, record: dict[str, Any], block: dict[str, Any]) -> None:
         if block["action"] == "unlock":

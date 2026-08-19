@@ -356,20 +356,28 @@ BLOCK_SCHEMAS: dict[str, vol.Schema] = {
             vol.Required("type"): "announce_loop",
             vol.Required("notify_service"): cv.string,  # e.g. "notify.alexa_media"
             vol.Required("message"): cv.string,
-            vol.Required("interval_s"): _POSITIVE_SECONDS,
+            vol.Required("interval_s"): _POSITIVE_SECONDS,  # Platzhalter wie bei notify
             vol.Required("media_targets", default=list): [cv.entity_id],
             vol.Optional("volume_pct"): _PERCENT,
             vol.Optional("volume_fallback_pct"): _PERCENT,
             vol.Optional("data", default=dict): dict,
         }
     ),
-    # One-shot notification at stage start.
+    # One-shot notification at stage start. Placeholders in title/message:
+    # {bereich}, {alarmtyp}, {sensoren}, {zeit}.
     "notify": vol.Schema(
         {
             vol.Required("type"): "notify",
-            vol.Required("service"): cv.string,
+            # Multiple targets (e.g. both phones); legacy "service" accepted.
+            vol.Required("services", default=list): [cv.string],
+            vol.Optional("service"): cv.string,
             vol.Required("message"): cv.string,
             vol.Optional("title"): cv.string,
+            # Critical delivery: breaks through mute/DND on iOS and Android.
+            vol.Required("critical", default=False): cv.boolean,
+            # Adds an acknowledge button (the only auth-free safe action;
+            # disarm-via-push needs an auth flow, critique finding 10).
+            vol.Required("ack_action", default=False): cv.boolean,
             vol.Optional("data", default=dict): dict,
         }
     ),

@@ -30,7 +30,8 @@ export const BLOCK_DEFAULTS = {
   sound:        { type: "sound", targets: [], retrigger_interval_s: 30, max_duration_s: 180 },
   announce_loop:{ type: "announce_loop", notify_service: "", message: "",
                   interval_s: 15, media_targets: [], volume_pct: 80, volume_fallback_pct: 30 },
-  notify:       { type: "notify", service: "persistent_notification.create", title: "", message: "" },
+  notify:       { type: "notify", services: [], title: "", message: "",
+                  critical: false, ack_action: false },
   lock:         { type: "lock", targets: [], action: "lock" },
 };
 
@@ -262,12 +263,22 @@ function blockFields(ctx, b, i, j) {
     case "announce_loop":
       return `${pickerField(ctx, id("notify_service"), "Notify-Service", b.notify_service, { kind: "service" })}
         <div class="form" style="margin-top:12px;">${txt("message", "Ansagetext")}</div>
+        <p class="muted">Platzhalter: {bereich}, {alarmtyp}, {sensoren}, {zeit}</p>
         ${pick("media_targets", "Player (Lautstärke)", ["media_player"])}
         <div class="form-grid" style="margin-top:12px;">${num("interval_s", "Intervall s")}
         ${num("volume_pct", "Lautstärke %")} ${num("volume_fallback_pct", "Fallback %")}</div>`;
-    case "notify":
-      return `${pickerField(ctx, id("service"), "Service", b.service, { kind: "service" })}
-        <div class="form-grid" style="margin-top:12px;">${txt("title", "Titel")} ${txt("message", "Text")}</div>`;
+    case "notify": {
+      const services = b.services && b.services.length ? b.services
+        : (b.service ? [b.service] : []);
+      return `${pickerField(ctx, id("services"), "Ziele (Handys, Dienste)", services,
+          { kind: "service", multi: true })}
+        <div class="form-grid" style="margin-top:12px;">${txt("title", "Titel")} ${txt("message", "Text")}</div>
+        <p class="muted">Platzhalter: {bereich}, {alarmtyp}, {sensoren}, {zeit}</p>
+        ${switchRow(id("critical"), "Kritisch zustellen", b.critical,
+          "durchbricht Stumm- und Nicht-stören-Modus auf dem Handy")}
+        ${switchRow(id("ack"), "Mit Quittieren-Knopf", b.ack_action,
+          "quittiert den Alarmspeicher direkt aus der Push heraus")}`;
+    }
     case "lock":
       return `${pick("targets", "Schlösser", ["lock"])}
         <div class="form-grid" style="margin-top:12px;">${selectField(id("action"), "Aktion",
