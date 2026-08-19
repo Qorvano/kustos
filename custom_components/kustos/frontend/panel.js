@@ -267,7 +267,7 @@ class KustosPanel extends HTMLElement {
         : v;
       return [...notify.map((v) => ({ value: v, primary: label(v), secondary: v })),
         { value: "persistent_notification.create",
-          primary: "HA-Oberfläche (Bildschirm-Meldung)",
+          primary: "HA-Oberfläche (Glocke in der Seitenleiste)",
           secondary: "persistent_notification.create" }];
     }
     const domains = (ds.domains || "").split(",").filter(Boolean);
