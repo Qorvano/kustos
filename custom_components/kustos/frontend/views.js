@@ -62,7 +62,7 @@ export function renderLeitstand(ctx) {
           <div class="big-state ${p.state}">${STATE_LABELS[p.state] || p.state}
             ${p.arm_mode ? `<span class="chip">${MODE_LABELS[p.arm_mode] || p.arm_mode}</span>` : ""}
             ${p.ends_at ? `<span class="chip" data-ends-at="${p.ends_at}"></span>` : ""}</div>
-          <p class="muted">${zones.length} Zone(n)${p.active_alarm_types.length
+          <p class="muted">${zones.length} Sensor(en)${p.active_alarm_types.length
             ? ` | aktiv: ${p.active_alarm_types.map((t) => ALARM_TYPE_LABELS[t] || t).join(", ")}` : ""}</p>
           ${bypassed}${memory}
         </div>
@@ -124,9 +124,9 @@ export function renderBereiche(ctx) {
         <div class="card-header">${esc(p.scope.type === "custom" ? p.scope.name : (ctx._areaName(p.scope.area_id) || p.scope.type))}
           <span class="hint">${modes || "keine Modi aktiviert"}</span></div>
         ${zones.length ? `<div class="rows">${zoneRows}</div>`
-          : `<div class="empty">Keine Zonen in diesem Bereich.</div>`}
+          : `<div class="empty">Keine Sensoren in diesem Bereich.</div>`}
         <div class="card-actions">
-          <button class="btn" data-action="new-zone" data-panel="${p.id}">${icon("plus",18)} Zone</button>
+          <button class="btn" data-action="new-zone" data-panel="${p.id}">${icon("plus",18)} Sensor</button>
           <button class="btn" data-action="edit-panel" data-id="${p.id}">${icon("pencil",18)} Bereich</button>
           <button class="btn danger" data-action="del-panel" data-id="${p.id}">${icon("delete",18)} Löschen</button>
         </div>
@@ -142,7 +142,7 @@ export function renderBereiche(ctx) {
   return `<div class="cards">${cards.join("") ||
     `<div class="card"><div class="empty">Noch keine Bereiche angelegt.</div></div>`}
     <div class="card"><div class="card-header">Bereichsgruppen
-        <span class="hint">schalten als Einheit, die Gesamtheit der Zonen zählt</span></div>
+        <span class="hint">schalten als Einheit, die Gesamtheit der Sensoren zählt</span></div>
       ${groups ? `<div class="rows">${groups}</div>`
         : `<div class="empty">Noch keine Gruppen.</div>`}
       <div class="card-actions"><button class="btn" data-action="new-group">${icon("plus",18)} Gruppe</button></div>
@@ -241,7 +241,7 @@ export function renderBetrieb(ctx) {
       `Walk-Test: ${esc(p.scope.type === "custom" ? p.scope.name : (ctx._areaName(p.scope.area_id) || p.scope.type))}`,
       info
         ? `läuft, Ende <span data-ends-at="${info.ends_at}"></span> | getestet: ${
-            info.tested.map((z) => esc(ctx._zoneName(z))).join(", ") || "noch keine Zone"}`
+            info.tested.map((z) => esc(ctx._zoneName(z))).join(", ") || "noch kein Sensor"}`
         : "nicht aktiv",
       `<span class="meta"><button class="btn ${info ? "danger" : ""}" data-action="walk"
          data-walk="${info ? "stop" : "start"}" data-panel="${p.id}">

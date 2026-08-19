@@ -156,7 +156,25 @@ class KustosPanel extends HTMLElement {
     }
     this.shadowRoot.innerHTML = `<style>${STYLES}${PICKER_STYLES}</style>${toolbar}${body}`;
     this._bindActions(this.shadowRoot);
+    this._wireZoneTypeHint();
     this._updateCountdowns();
+  }
+
+  _wireZoneTypeHint() {
+    if (this._edit?.kind !== "zone") return;
+    const sel = this._q("z-type");
+    const hint = this._q("z-type-hint");
+    if (!sel || !hint) return;
+    const update = () => {
+      const panelDoc = (this._data.panels || []).find((x) => x.id === this._edit.panelId);
+      const profileId = ((panelDoc?.alarm_types || {})[sel.value] || {}).profile_id;
+      const profile = (this._data.profiles || []).find((x) => x.id === profileId);
+      hint.textContent = profile
+        ? `Löst in diesem Bereich das Profil "${profile.name}" aus.`
+        : "Für diesen Alarmtyp ist in diesem Bereich kein Reaktionsprofil zugeordnet (Bereich bearbeiten, Karte Reaktionsprofile).";
+    };
+    sel.onchange = update;
+    update();
   }
 
   _bindActions(root) {
@@ -281,7 +299,7 @@ class KustosPanel extends HTMLElement {
     if (a === "new-panel") { this._edit = { kind: "panel", draft: { modes: { armed_away: { enabled: true } }, options: {}, scope: {} } }; return this._render(); }
     if (a === "edit-panel") { this._edit = { kind: "panel", draft: structuredClone((this._data.panels || []).find((p) => p.id === ds.id)) }; return this._render(); }
     if (a === "del-panel") {
-      if (!confirm("Bereich samt Zonen-Konfiguration löschen?")) return;
+      if (!confirm("Bereich samt Sensor-Konfiguration löschen?")) return;
       await this._ws("kustos/panels/delete", { panel_id: ds.id }); return this._refresh();
     }
     if (a === "save-panel") {
@@ -324,7 +342,7 @@ class KustosPanel extends HTMLElement {
       this._edit = { kind: "zone", panelId: ds.panel, draft: structuredClone(z) }; return this._render();
     }
     if (a === "del-zone") {
-      if (!confirm("Zone löschen?")) return;
+      if (!confirm("Sensor löschen?")) return;
       await this._ws("kustos/zones/delete", { zone_id: ds.id }); return this._refresh();
     }
     if (a === "save-zone") {

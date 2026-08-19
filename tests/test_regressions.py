@@ -131,3 +131,39 @@ async def test_rearm_during_downtime_restores_originals_not_alarm_colors(
     hub = entry.runtime_data.hub
     assert not hub.engine.has_instances(panel["id"])
     assert hass_storage[STORAGE_KEY_SNAPSHOTS]["data"] == {}
+
+
+async def test_same_sensor_same_type_rejected_but_other_type_allowed(hass):
+    """User-Anforderung 2026-08-19: derselbe Sensor darf pro Bereich je
+    Alarmtyp nur einmal existieren (einmal Einbruch + einmal Feuer ok,
+    zweimal Einbruch nicht)."""
+    import pytest
+    import voluptuous as vol
+
+    entry = MockConfigEntry(domain=DOMAIN, title="Kustos")
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    storage = entry.runtime_data.storage
+    panel = await storage.panels.async_create_item(
+        {"scope": {"type": "custom", "name": "Test"}}
+    )
+    await hass.async_block_till_done()
+    storage = entry.runtime_data.storage
+
+    base = {"entity_id": "binary_sensor.melder", "panel_id": panel["id"]}
+    z1 = await storage.zones.async_create_item({**base, "alarm_type": "burglary"})
+    await storage.zones.async_create_item({**base, "alarm_type": "fire"})  # ok
+    with pytest.raises(vol.Invalid):
+        await storage.zones.async_create_item({**base, "alarm_type": "burglary"})
+    # Update darf nicht in ein Duplikat laufen.
+    z3 = await storage.zones.async_create_item(
+        {"entity_id": "binary_sensor.anderer", "panel_id": panel["id"],
+         "alarm_type": "burglary"}
+    )
+    with pytest.raises(vol.Invalid):
+        await storage.zones.async_update_item(
+            z3["id"], {"entity_id": "binary_sensor.melder"}
+        )
+    # Der eigene Datensatz kollidiert nicht mit sich selbst.
+    await storage.zones.async_update_item(z1["id"], {"name": "Melder"})

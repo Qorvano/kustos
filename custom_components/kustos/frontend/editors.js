@@ -25,7 +25,7 @@ export const EDITOR_TITLES = {
   settings: ["Einstellungen", "Einstellungen"],
   group: ["Neue Bereichsgruppe", "Bereichsgruppe bearbeiten"],
   panel: ["Neuer Bereich", "Bereich bearbeiten"],
-  zone: ["Neue Zone", "Zone bearbeiten"],
+  zone: ["Neuer Sensor", "Sensor bearbeiten"],
   profile: ["Neues Profil", "Profil bearbeiten"],
   member: ["", "Person bearbeiten"],
   rule: ["Neue Regel", "Regel bearbeiten"],
@@ -41,9 +41,9 @@ export const textField = (id, label, value, opts = {}) => `
 export const numField = (id, label, value, placeholder = "") =>
   textField(id, label, value ?? "", { type: "number", step: "0.1", placeholder });
 
-export const selectField = (id, label, options, selected) => `
-  <div class="field"><label for="${id}">${label}</label>
-    <select id="${id}">${options.map(([v, text]) =>
+export const selectField = (id, label, options, selected, opts = {}) => `
+  <div class="field ${opts.disabled ? "disabled" : ""}"><label for="${id}">${label}</label>
+    <select id="${id}" ${opts.disabled ? "disabled" : ""}>${options.map(([v, text]) =>
       `<option value="${esc(v)}" ${String(v) === String(selected) ? "selected" : ""}>${esc(text)}</option>`).join("")}
     </select></div>`;
 
@@ -150,7 +150,7 @@ function panelEditor(ctx, doc) {
       ${switchRow("f-codearm", "Code zum Scharfschalten", opts.code_arm_required)}
       ${switchRow("f-codedisarm", "Code zum Entschärfen", opts.code_disarm_required !== false)}
       ${switchRow("f-rearm", "Nach Ablauf der Alarmdauer wieder scharf",
-        opts.rearm_after_trigger !== false, "offene Zonen werden dabei sichtbar überbrückt")}`)}
+        opts.rearm_after_trigger !== false, "offene Sensoren werden dabei sichtbar überbrückt")}`)}
     ${card("Reaktionsprofile je Alarmtyp", assignments)}`;
 }
 
@@ -158,19 +158,25 @@ function zoneEditor(ctx, doc) {
   const panelDoc = (ctx._data.panels || []).find((p) => p.id === ctx._edit.panelId);
   const enabledModes = Object.entries(panelDoc?.modes || {})
     .filter(([, c]) => c.enabled).map(([m]) => m);
-  const roles = `<div class="form-grid">${(enabledModes.length ? enabledModes : ["armed_away"])
-    .map((m) => selectField(`role-${m}`, MODE_LABELS[m],
-      ROLES.map((r) => [r, ROLE_LABELS[r]]), (doc.modes || {})[m] || "inactive")).join("")}</div>`;
+  // Alle Modi zeigen; im Bereich nicht aktivierte ausgegraut (User-Feedback).
+  const roles = `<div class="form-grid">${ALL_MODES.map((m) => {
+    const enabled = enabledModes.includes(m);
+    return selectField(`role-${m}`,
+      enabled ? MODE_LABELS[m] : `${MODE_LABELS[m]} (im Bereich nicht aktiviert)`,
+      ROLES.map((r) => [r, ROLE_LABELS[r]]), (doc.modes || {})[m] || "inactive",
+      { disabled: !enabled });
+  }).join("")}</div>`;
   const o = doc.options || {};
   return `
-    ${card("Zone", `<div class="form">
+    ${card("Sensor", `<div class="form">
       ${pickerField(ctx, "z-entity", "Entität", doc.entity_id,
         { domains: ["binary_sensor", "input_boolean", "switch", "sensor"] })}
       ${textField("z-name", "Name (optional)", doc.name)}
       ${selectField("z-type", "Alarmtyp", ALARM_TYPES.map((t) => [t, ALARM_TYPE_LABELS[t]]),
-        doc.alarm_type || "burglary")}</div>`,
+        doc.alarm_type || "burglary")}
+      <div class="muted" id="z-type-hint"></div></div>`,
       "Feuer/Wasser/CO/Sabotage sind automatisch 24/7 scharf")}
-    ${card("Rolle je Modus", roles)}
+    ${card("Rolle je Modus", roles, "steuert, wann dieser Sensor überwacht wird")}
     ${card("Optionen", `
       ${switchRow("z-exitok", "Darf beim Verlassen offen sein", o.use_exit_delay)}
       ${switchRow("z-armclose", "Schließen beendet das Exit-Delay", o.arm_after_closing)}
@@ -281,7 +287,7 @@ function groupEditor(ctx, doc) {
       (doc.panel_ids || []).includes(p.id))).join("");
   return `
     ${card("Bereichsgruppe", `<div class="form">${textField("g-name", "Name", doc.name)}</div>`,
-      "schaltet als Einheit; die Gesamtheit aller Zonen zählt")}
+      "schaltet als Einheit; die Gesamtheit aller Sensoren zählt")}
     ${card("Mitglieder", checks || '<span class="muted">Noch keine Bereiche angelegt.</span>')}`;
 }
 

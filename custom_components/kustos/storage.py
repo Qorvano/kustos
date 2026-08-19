@@ -66,6 +66,33 @@ class PanelCollection(_UlidCollection):
 class ZoneCollection(_UlidCollection):
     CREATE_UPDATE_SCHEMA = ZONE_FIELDS
 
+    def _check_duplicate(self, data: dict[str, Any], exclude_id: str | None = None) -> None:
+        """Same sensor may exist per panel once PER ALARM TYPE, never twice
+        with the same type (contradictory duplicates, user requirement)."""
+        for item in self.data.values():
+            if exclude_id is not None and item["id"] == exclude_id:
+                continue
+            if (
+                item["panel_id"] == data["panel_id"]
+                and item["entity_id"] == data["entity_id"]
+                and str(item["alarm_type"]) == str(data["alarm_type"])
+            ):
+                raise vol.Invalid(
+                    "Dieser Sensor ist in diesem Bereich mit diesem Alarmtyp bereits angelegt"
+                )
+
+    async def _process_create_data(self, data: dict[str, Any]) -> dict[str, Any]:
+        validated = self.CREATE_UPDATE_SCHEMA(data)
+        self._check_duplicate(validated)
+        return validated
+
+    async def _update_data(
+        self, item: dict[str, Any], update_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        result = await super()._update_data(item, update_data)
+        self._check_duplicate(result, exclude_id=item["id"])
+        return result
+
 
 class ProfileCollection(_UlidCollection):
     CREATE_UPDATE_SCHEMA = PROFILE_FIELDS
