@@ -62,6 +62,50 @@ class ReactionEngine:
     def _records(self) -> dict[str, dict[str, Any]]:
         return self._storage.runtime.setdefault("engine", {}).setdefault("instances", {})
 
+    async def async_start_event(
+        self, panel_id: str, area_id: str | None, event: str, profile_id: str
+    ) -> None:
+        """State-change profile (arming beep etc.): lowest claim priority,
+        self-teardown once its finite timeline ends."""
+        for record in self._records().values():
+            if (
+                record["panel_id"] == panel_id
+                and record.get("kind") == "event"
+                and record.get("event") == event
+            ):
+                return
+        profile = next(
+            (p for p in self._storage.profiles.async_items() if p["id"] == profile_id),
+            None,
+        )
+        if profile is None:
+            return
+        record = {
+            "kind": "event",
+            "event": event,
+            "detached": False,
+            "instance_id": ulid_util.ulid_now(),
+            "panel_id": panel_id,
+            "area_id": area_id,
+            "alarm_type": None,
+            "profile_name": profile.get("name"),
+            "stages": profile["stages"],
+            "t0": dt_util.utcnow().isoformat(),
+            "stage_index": 0,
+        }
+        self._records()[record["instance_id"]] = record
+        await self._storage.async_save_runtime()
+        self._tasks[record["instance_id"]] = self._hass.async_create_background_task(
+            self._run(record), name=f"kustos_event_{record['instance_id']}"
+        )
+
+    async def async_stop_events(self, panel_id: str) -> None:
+        for record in [
+            r for r in self._records().values()
+            if r["panel_id"] == panel_id and r.get("kind") == "event"
+        ]:
+            await self._teardown(record, restore=True)
+
     async def async_start(
         self,
         panel_id: str,
@@ -137,7 +181,9 @@ class ReactionEngine:
 
     def has_instances(self, panel_id: str) -> bool:
         return any(
-            r["panel_id"] == panel_id and not r.get("detached")
+            r["panel_id"] == panel_id
+            and not r.get("detached")
+            and r.get("kind") != "event"
             for r in self._records().values()
         )
 
@@ -148,6 +194,7 @@ class ReactionEngine:
             r
             for r in self._records().values()
             if r["panel_id"] == panel_id
+            and r.get("kind") != "event"
             and (include_detached or not r.get("detached"))
         ]:
             await self._teardown(record, restore=restore)
@@ -205,6 +252,15 @@ class ReactionEngine:
                 acc = boundary
                 for task in block_tasks:
                     task.cancel()
+            if record.get("kind") == "event":
+                # Confirmation-style profiles clean up after themselves;
+                # teardown from a fresh task (cancelling ourselves mid-await
+                # would abort the teardown sequence).
+                self._hass.async_create_background_task(
+                    self._teardown(record, restore=True),
+                    name="kustos_event_teardown",
+                )
+                return
             # Timeline exhausted (all stages finite): stay alive silently
             # until the panel leaves TRIGGERED and tears us down.
             await asyncio.Event().wait()
@@ -217,8 +273,10 @@ class ReactionEngine:
     # Claims
     # ------------------------------------------------------------------
 
-    def _priority(self, alarm_type: str) -> int:
+    def _priority(self, alarm_type: str | None) -> int:
         order = self._storage.setting("engine", "alarm_type_priority")
+        if alarm_type is None:
+            return len(order) + 1  # event profiles always lose against alarms
         try:
             return order.index(AlarmType(alarm_type))
         except ValueError:
@@ -481,7 +539,7 @@ class ReactionEngine:
     async def _block_lock(self, record: dict[str, Any], block: dict[str, Any]) -> None:
         if block["action"] == "unlock":
             allowed = self._storage.setting("engine", "life_safety_unlock_types")
-            if AlarmType(record["alarm_type"]) not in allowed:
+            if record.get("alarm_type") is None or AlarmType(record["alarm_type"]) not in allowed:
                 _LOGGER.error(
                     "Unlock refused: %s is not a life-safety alarm type",
                     record["alarm_type"],

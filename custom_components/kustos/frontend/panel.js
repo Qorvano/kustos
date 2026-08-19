@@ -411,11 +411,16 @@ class KustosPanel extends HTMLElement {
         const v = this._val(`prof-${t}`);
         if (v) alarm_types[t] = { profile_id: v };
       }
+      const event_profiles = {};
+      for (const k of ["arming", "armed", "pending", "disarmed"]) {
+        const v = this._val(`evprof-${k}`);
+        if (v) event_profiles[k] = { profile_id: v };
+      }
       const scope = this._val("f-scopetype") === "custom"
         ? { type: "custom", name: this._val("f-cname") }
         : { type: "area", area_id: this._val("f-area") };
       const payload = {
-        scope, modes, alarm_types,
+        scope, modes, alarm_types, event_profiles,
         options: {
           code_arm_required: this._chk("f-codearm"),
           code_disarm_required: this._chk("f-codedisarm"),

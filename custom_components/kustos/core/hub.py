@@ -26,6 +26,10 @@ from ..const import (
     ATTR_ALARM_TYPE,
     ATTR_ENTITY_ID,
     ATTR_ZONE_ID,
+    EVENT_ARMED,
+    EVENT_ARMING,
+    EVENT_DISARMED,
+    EVENT_PENDING,
     EVENT_TRIGGERED,
     EVENT_WALK_TEST_ZONE,
     ArmMode,
@@ -103,6 +107,8 @@ class KustosHub:
         for panel_id, fsm in self.fsms.items():
             if fsm.state is not PanelState.TRIGGERED and self.engine.has_instances(panel_id):
                 await self.engine.async_stop_panel(panel_id, restore=True)
+            # Confirmation profiles are ephemeral; never resume them.
+            await self.engine.async_stop_events(panel_id)
         await self.engine.async_resume()
         # HA persons ARE the Kustos people: everyone appears automatically,
         # only rights/PINs/presence details get configured (user decision).
@@ -677,6 +683,29 @@ class KustosHub:
     # Effects
     # ------------------------------------------------------------------
 
+    _PANEL_EVENT_KEYS = {
+        EVENT_ARMING: "arming",
+        EVENT_ARMED: "armed",
+        EVENT_PENDING: "pending",
+        EVENT_DISARMED: "disarmed",
+    }
+
+    async def _handle_panel_event(self, panel_id: str, event_key: str | None) -> None:
+        """State changed: end the previous state's profile, start the new one."""
+        await self.engine.async_stop_events(panel_id)
+        if event_key is None:
+            return
+        doc = self.panel_doc(panel_id)
+        assignment = (doc or {}).get("event_profiles", {}).get(event_key) or {}
+        if assignment.get("profile_id"):
+            fsm = self.fsms.get(panel_id)
+            await self.engine.async_start_event(
+                panel_id,
+                fsm.area_id if fsm else None,
+                event_key,
+                assignment["profile_id"],
+            )
+
     def _apply_effects(self, panel_id: str, fx: Effects) -> None:
         for event_name, payload in fx.events:
             self._hass.bus.async_fire(event_name, payload)
@@ -684,8 +713,17 @@ class KustosHub:
             if event_name == EVENT_TRIGGERED:
                 fsm = self.fsms[panel_id]
                 self._hass.async_create_task(
+                    self._handle_panel_event(panel_id, None)
+                )
+                self._hass.async_create_task(
                     self.engine.async_start(
                         panel_id, fsm.area_id, payload[ATTR_ALARM_TYPE]
+                    )
+                )
+            elif event_name in self._PANEL_EVENT_KEYS:
+                self._hass.async_create_task(
+                    self._handle_panel_event(
+                        panel_id, self._PANEL_EVENT_KEYS[event_name]
                     )
                 )
 

@@ -157,6 +157,13 @@ function panelEditor(ctx, doc) {
   const assignments = `<div class="form-grid">${ALARM_TYPES.map((t) =>
     selectField(`prof-${t}`, ALARM_TYPE_LABELS[t],
       profileOptions(), ((doc.alarm_types || {})[t] || {}).profile_id || "")).join("")}</div>`;
+  const PANEL_EVENT_LABELS = {
+    arming: "Scharfschalten läuft (Exit-Delay)", armed: "Scharf geschaltet",
+    pending: "Eintrittsverzögerung läuft", disarmed: "Unscharf geschaltet",
+  };
+  const eventAssignments = `<div class="form-grid">${Object.entries(PANEL_EVENT_LABELS).map(([k, label]) =>
+    selectField(`evprof-${k}`, label,
+      profileOptions(), ((doc.event_profiles || {})[k] || {}).profile_id || "")).join("")}</div>`;
   const scopeType = doc.scope?.type === "custom" ? "custom" : "area";
   return `
     ${card("Bereich", `<div class="form">
@@ -171,7 +178,9 @@ function panelEditor(ctx, doc) {
       ${switchRow("f-codedisarm", "Code zum Entschärfen", opts.code_disarm_required !== false)}
       ${switchRow("f-rearm", "Nach Ablauf der Alarmdauer wieder scharf",
         opts.rearm_after_trigger !== false, "offene Sensoren werden dabei sichtbar überbrückt")}`)}
-    ${card("Reaktionsprofile je Alarmtyp", assignments)}`;
+    ${card("Reaktionsprofile je Alarmtyp", assignments)}
+    ${card("Profile bei Zustandswechsel", eventAssignments,
+      "z.B. Quittierungston beim Scharfschalten oder Warn-Ansage im Entry-Delay; laufen bis zum nächsten Zustandswechsel bzw. bis ihre Stufen enden")}`;
 }
 
 function zoneEditor(ctx, doc) {

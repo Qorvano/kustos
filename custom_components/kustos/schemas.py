@@ -194,6 +194,12 @@ ALARM_TYPE_ASSIGNMENT_SCHEMA = vol.Schema(
     {vol.Coerce(AlarmType): vol.Schema({vol.Required("profile_id"): vol.Any(None, cv.string)})}
 )
 
+# Profiles bound to panel state changes (arming beep, disarm chime, ...).
+PANEL_EVENTS = ["arming", "armed", "pending", "disarmed"]
+EVENT_PROFILE_SCHEMA = vol.Schema(
+    {vol.In(PANEL_EVENTS): vol.Schema({vol.Required("profile_id"): vol.Any(None, cv.string)})}
+)
+
 PANEL_CREATE_FIELDS = {
     vol.Required("scope"): SCOPE_SCHEMA,
     vol.Required("enabled", default=True): cv.boolean,
@@ -202,6 +208,7 @@ PANEL_CREATE_FIELDS = {
     # Which reaction profile runs per alarm type (critique finding 4: the
     # panel document is the single source of this assignment).
     vol.Required("alarm_types", default=dict): ALARM_TYPE_ASSIGNMENT_SCHEMA,
+    vol.Required("event_profiles", default=dict): EVENT_PROFILE_SCHEMA,
 }
 PANEL_UPDATE_FIELDS = {
     vol.Optional("scope"): SCOPE_SCHEMA,
@@ -209,6 +216,7 @@ PANEL_UPDATE_FIELDS = {
     vol.Optional("modes"): MODES_MAP_SCHEMA,
     vol.Optional("options"): PANEL_OPTIONS_SCHEMA,
     vol.Optional("alarm_types"): ALARM_TYPE_ASSIGNMENT_SCHEMA,
+    vol.Optional("event_profiles"): EVENT_PROFILE_SCHEMA,
 }
 PANEL_FIELDS = vol.Schema(PANEL_CREATE_FIELDS)
 
