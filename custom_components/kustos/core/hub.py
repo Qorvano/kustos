@@ -67,6 +67,8 @@ class KustosHub:
         self._zone_unsub: Any | None = None
         self._config_unsub: Any | None = None
         self._zone_by_entity: dict[str, list[tuple[str, str]]] = {}
+        # Vibration filter: (panel_id, zone_id) -> trip timestamps
+        self._trip_history: dict[tuple[str, str], list[Any]] = {}
         self.snapshots = SnapshotManager(hass, storage)
         self.engine = ReactionEngine(hass, storage, self.snapshots)
         self.audit = AuditLog(hass)
@@ -204,6 +206,9 @@ class KustosHub:
                 # .get: zone documents stored before M4 lack the key; the
                 # fallback mirrors the schema default.
                 unavailable_policy=item["options"].get("unavailable_policy", "ignore"),
+                invert=item["options"].get("invert", False),
+                sensor_type=item.get("sensor_type", "opening"),
+                evaluation=item.get("evaluation") or {},
             )
             zones_by_panel.setdefault(item["panel_id"], {})[zone.zone_id] = zone
             self._zone_by_entity.setdefault(item["entity_id"], []).append(
@@ -299,23 +304,73 @@ class KustosHub:
             if new_state.state == STATE_UNAVAILABLE:
                 self._apply_effects(panel_id, fsm.zone_unavailable(zone_id))
                 continue
-            was_open = old_state is not None and self._is_open_state(old_state.state)
-            is_open = self._is_open_state(new_state.state)
-            if is_open and not was_open:
-                self._apply_effects(panel_id, fsm.zone_tripped(zone_id))
-            elif was_open and not is_open:
+            was = self._classify(zone, old_state)
+            now = self._classify(zone, new_state)
+            if now == "open" and was != "open":
+                if self._vibration_filter_passes(panel_id, zone):
+                    self._apply_effects(panel_id, fsm.zone_tripped(zone_id))
+            elif was == "open" and now != "open":
                 self._apply_effects(
                     panel_id, fsm.zone_closed(zone_id, self._open_zone_ids(panel_id))
                 )
 
-    def _is_open_state(self, state: str) -> bool:
-        return state == STATE_ON
-
-    def _zone_open(self, entity_id: str) -> bool:
-        state = self._hass.states.get(entity_id)
+    def _classify(self, zone: ZoneConfig, state) -> str:
+        """Sensor state -> closed | tilted | open | unknown (type-aware)."""
         if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            return False
-        return self._is_open_state(state.state)
+            return "unknown"
+        evaluation = zone.evaluation or {}
+        if zone.sensor_type == "tilt":
+            open_min = evaluation.get("open_min")
+            try:
+                value = float(state.state)
+            except ValueError:
+                value = None
+            if value is not None and open_min is not None:
+                if value >= open_min:
+                    return "open"
+                tilt_min = evaluation.get("tilt_min")
+                if tilt_min is not None and value >= tilt_min:
+                    return "tilted"
+                return "closed"
+            # Binary tilt contact: on means tilted, full open is not
+            # distinguishable and therefore never trips by itself.
+            is_on = state.state == STATE_ON
+            if zone.invert:
+                is_on = not is_on
+            return "tilted" if is_on else "closed"
+        is_on = state.state == STATE_ON
+        if zone.invert:
+            is_on = not is_on
+        return "open" if is_on else "closed"
+
+    def _vibration_filter_passes(self, panel_id: str, zone: ZoneConfig) -> bool:
+        """Vibration sensors may require N trips within a window."""
+        evaluation = zone.evaluation or {}
+        count = int(evaluation.get("trip_count", 1))
+        if zone.sensor_type != "vibration" or count <= 1:
+            return True
+        window = float(evaluation.get("trip_window_s", 0))
+        key = (panel_id, zone.zone_id)
+        now = dt_util.utcnow()
+        history = [
+            ts for ts in self._trip_history.get(key, [])
+            if (now - ts).total_seconds() <= window
+        ]
+        history.append(now)
+        if len(history) >= count:
+            self._trip_history[key] = []
+            return True
+        self._trip_history[key] = history
+        return False
+
+    def _zone_blocks_arming(self, zone: ZoneConfig) -> bool:
+        state = self._hass.states.get(zone.entity_id)
+        classification = self._classify(zone, state)
+        if classification == "open":
+            return True
+        if classification == "tilted":
+            return not (zone.evaluation or {}).get("arm_allowed_when_tilted", True)
+        return False
 
     def _open_zone_ids(self, panel_id: str) -> set[str]:
         fsm = self.fsms.get(panel_id)
@@ -324,7 +379,7 @@ class KustosHub:
         return {
             zone_id
             for zone_id, zone in fsm.zones.items()
-            if self._zone_open(zone.entity_id)
+            if self._zone_blocks_arming(zone)
         }
 
     # ------------------------------------------------------------------

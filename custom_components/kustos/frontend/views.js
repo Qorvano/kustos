@@ -20,6 +20,10 @@ export const ALARM_TYPE_LABELS = {
   burglary: "Einbruch", fire: "Feuer", water: "Wasser", co: "CO",
   tamper: "Sabotage", holdup: "Überfall (still)", panic: "Panik", technical: "Technik",
 };
+export const SENSOR_TYPE_LABELS_VIEW = {
+  opening: "Öffnung", motion: "Bewegung", tilt: "Neigung",
+  vibration: "Erschütterung", glass: "Glasbruch", generic: "Allgemein",
+};
 export const BLOCK_LABELS = {
   flash_lights: "Licht blinken", lights_on: "Licht an", sound: "Alarmgeber",
   announce_loop: "Ansage-Loop", notify: "Benachrichtigung", lock: "Schloss",
@@ -113,7 +117,8 @@ export function renderBereiche(ctx) {
     const zoneRows = zones.map((z) => listRow(
       "shield",
       esc(z.name || ctx._friendly(z.entity_id)),
-      `${esc(z.entity_id)} | ${ALARM_TYPE_LABELS[z.alarm_type] || z.alarm_type} | ${
+      `${esc(z.entity_id)} | ${ALARM_TYPE_LABELS[z.alarm_type] || z.alarm_type}${
+        z.sensor_type && z.sensor_type !== "opening" ? ` | ${SENSOR_TYPE_LABELS_VIEW[z.sensor_type] || z.sensor_type}` : ""} | ${
         Object.entries(z.modes).map(([m, r]) => `${MODE_LABELS[m] || m}: ${r}`).join(", ") || "keine Rolle"}`,
       rowActions(
         { action: "edit-zone", attrs: `data-id="${z.id}" data-panel="${p.id}"` },

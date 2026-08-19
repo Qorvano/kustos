@@ -6,6 +6,19 @@ import {
   ALARM_TYPES, ALARM_TYPE_LABELS, ALL_MODES, BLOCK_LABELS, MODE_LABELS,
 } from "./views.js";
 
+export const SENSOR_TYPE_LABELS = {
+  opening: "Öffnung (Tür/Fenster)", motion: "Bewegung", tilt: "Neigung (Kippfenster)",
+  vibration: "Erschütterung", glass: "Glasbruch", generic: "Allgemein",
+};
+export const BLOCK_DESCRIPTIONS = {
+  flash_lights: "Farbfähige Lampen blinken in der Alarmfarbe, Zustände werden exakt wiederhergestellt",
+  lights_on: "Lampen dauerhaft an, optional zyklisch nachgeschaltet (Flutlichter)",
+  sound: "Sirenen, Schalter oder Taster mit Nachtrigger (z.B. Rauchmelder-Testknopf)",
+  announce_loop: "Wiederkehrende Sprachansage über einen Notify-Service, mit Lautstärke-Restore",
+  notify: "Einmalige Benachrichtigung beim Start der Stufe",
+  lock: "Türschlösser verriegeln oder (bei Feuer/CO) öffnen",
+};
+
 export const ROLES = ["inactive", "instant", "delayed", "follower"];
 export const ROLE_LABELS = {
   inactive: "inaktiv", instant: "sofort", delayed: "verzögert", follower: "Folgezone",
@@ -185,7 +198,26 @@ function zoneEditor(ctx, doc) {
       ${textField("z-name", "Name (optional)", doc.name)}
       ${selectField("z-type", "Alarmtyp", ALARM_TYPES.map((t) => [t, ALARM_TYPE_LABELS[t]]),
         doc.alarm_type || "burglary")}
-      <div class="muted" id="z-type-hint"></div></div>`,
+      <div class="muted" id="z-type-hint"></div>
+      ${selectField("z-sensortype", "Sensortyp",
+        Object.entries(SENSOR_TYPE_LABELS), doc.sensor_type || "opening")}
+      <div id="st-tilt" class="${(doc.sensor_type || "opening") === "tilt" ? "" : "hidden"}">
+        <div class="form-grid">
+          ${numField("z-tiltmin", "Gekippt ab (Sensorwert)", (doc.evaluation || {}).tilt_min)}
+          ${numField("z-openmin", "Offen ab (Sensorwert)", (doc.evaluation || {}).open_min)}
+        </div>
+        ${switchRow("z-tiltarm", "Scharfschalten bei gekipptem Fenster erlaubt",
+          (doc.evaluation || {}).arm_allowed_when_tilted !== false,
+          "gekippt löst nie aus; Alarm erst ab dem Offen-Wert")}
+        <p class="muted">Ohne Werte gilt: binärer Kipp-Sensor, an = gekippt (löst nie selbst aus).</p>
+      </div>
+      <div id="st-vibration" class="${(doc.sensor_type || "opening") === "vibration" ? "" : "hidden"}">
+        <div class="form-grid">
+          ${numField("z-tripcount", "Auslösungen bis Alarm", (doc.evaluation || {}).trip_count ?? 1)}
+          ${numField("z-tripwindow", "Zeitfenster s", (doc.evaluation || {}).trip_window_s ?? 30)}
+        </div>
+        <p class="muted">Erst die eingestellte Anzahl Impulse innerhalb des Fensters löst aus (Fehlalarm-Schutz).</p>
+      </div></div>`,
       "Feuer/Wasser/CO/Sabotage sind automatisch 24/7 scharf")}
     ${card("Rolle je Modus", roles, "steuert, wann dieser Sensor überwacht wird")}
     ${card("Optionen", `
@@ -254,10 +286,8 @@ function profileEditor(ctx, doc) {
     return card(`Stufe ${i + 1}`, `
       <div class="form">${numField(`stage-${i}-dur`, "Dauer s (leer = bis Alarmende)", s.duration_s)}</div>
       <div style="margin-top:12px;">${blocks}</div>
-      <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
-        ${selectField(`stage-${i}-newblock`, "Baustein-Typ",
-          Object.keys(BLOCK_DEFAULTS).map((t) => [t, BLOCK_LABELS[t]]), "flash_lights")}
-        <button class="btn" data-action="add-block" data-i="${i}">${icon("plus", 18)} Baustein</button>
+      <div style="margin-top:8px;">
+        <button class="btn" data-action="add-block" data-i="${i}">${icon("plus", 18)} Baustein hinzufügen</button>
       </div>`,
       `<button class="btn danger" data-action="del-stage" data-i="${i}">Stufe entfernen</button>`);
   }).join("");

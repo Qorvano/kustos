@@ -72,6 +72,9 @@ class ZoneConfig:
     auto_bypass: bool = False
     trigger_when_unavailable: bool = False
     unavailable_policy: str = "ignore"
+    sensor_type: str = "opening"
+    invert: bool = False
+    evaluation: dict[str, Any] | None = None
 
     @property
     def always_on(self) -> bool:

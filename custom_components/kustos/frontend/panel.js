@@ -5,9 +5,9 @@
 import { STYLES, PICKER_STYLES, esc, icon } from "./styles.js";
 import {
   renderLeitstand, renderBereiche, renderProfile, renderPersonen, renderBetrieb,
-  ALL_MODES, ALARM_TYPES,
+  ALL_MODES, ALARM_TYPES, BLOCK_LABELS,
 } from "./views.js";
-import { renderEditor, pickerValueHTML, BLOCK_DEFAULTS, EDITOR_TITLES } from "./editors.js";
+import { renderEditor, pickerValueHTML, BLOCK_DEFAULTS, BLOCK_DESCRIPTIONS, EDITOR_TITLES } from "./editors.js";
 
 const TABS = {
   leitstand: ["Leitstand", renderLeitstand],
@@ -220,6 +220,16 @@ class KustosPanel extends HTMLElement {
     };
     sel.onchange = update;
     update();
+    const typeSel = this._q("z-sensortype");
+    if (typeSel) {
+      typeSel.onchange = () => {
+        this._markDirty();
+        for (const t of ["tilt", "vibration"]) {
+          const section = this._q(`st-${t}`);
+          if (section) section.classList.toggle("hidden", typeSel.value !== t);
+        }
+      };
+    }
   }
 
   _bindActions(root) {
@@ -271,6 +281,33 @@ class KustosPanel extends HTMLElement {
         this, values, ds.multi === "1", ds.kind, ds.placeholder || "Auswählen");
       this._bindActions(display);
     }
+  }
+
+  _openBlockChooser(stageIndex) {
+    const ov = document.createElement("div");
+    ov.className = "overlay";
+    ov.innerHTML = `<div class="picker-dialog">
+      <div class="picker-title">Baustein hinzufügen</div>
+      <div class="picker-list">${Object.keys(BLOCK_DEFAULTS).map((t) => `
+        <div class="picker-item" data-v="${t}">
+          <span class="pi-body"><div>${BLOCK_LABELS[t]}</div>
+            <div class="pi-sec" style="white-space:normal;">${BLOCK_DESCRIPTIONS[t]}</div></span>
+        </div>`).join("")}</div>
+      <div class="picker-actions"><button class="btn" data-x="cancel">Abbrechen</button></div>
+    </div>`;
+    ov.querySelector('[data-x="cancel"]').onclick = () => ov.remove();
+    ov.onclick = (ev) => { if (ev.target === ov) ov.remove(); };
+    for (const item of ov.querySelectorAll(".picker-item")) {
+      item.onclick = () => {
+        ov.remove();
+        this._dirty = true;
+        this._syncProfileDraft();
+        this._edit.draft.stages[stageIndex].blocks.push(
+          structuredClone(BLOCK_DEFAULTS[item.dataset.v]));
+        this._render();
+      };
+    }
+    this.shadowRoot.appendChild(ov);
   }
 
   _openPicker(ds) {
@@ -402,9 +439,16 @@ class KustosPanel extends HTMLElement {
         const sel = this._q(`role-${m}`);
         if (sel && sel.value !== "inactive") modes[m] = sel.value;
       }
+      const evaluation = { arm_allowed_when_tilted: this._chk("z-tiltarm") };
+      for (const [id, key] of [["z-tiltmin", "tilt_min"], ["z-openmin", "open_min"],
+                               ["z-tripcount", "trip_count"], ["z-tripwindow", "trip_window_s"]]) {
+        const v = this._num(id);
+        if (v !== null) evaluation[key] = v;
+      }
       const payload = {
         entity_id: this._val("z-entity"), panel_id: ds.panel,
-        name: this._val("z-name") || null, alarm_type: this._val("z-type"), modes,
+        name: this._val("z-name") || null, alarm_type: this._val("z-type"),
+        sensor_type: this._val("z-sensortype") || "opening", evaluation, modes,
         options: {
           use_exit_delay: this._chk("z-exitok"), arm_after_closing: this._chk("z-armclose"),
           allow_open: this._chk("z-allowopen"), auto_bypass: this._chk("z-bypass"),
@@ -428,12 +472,7 @@ class KustosPanel extends HTMLElement {
     }
     if (a === "add-stage") { this._dirty = true; this._syncProfileDraft(); this._edit.draft.stages.push({ duration_s: null, blocks: [] }); return this._render(); }
     if (a === "del-stage") { this._dirty = true; this._syncProfileDraft(); this._edit.draft.stages.splice(Number(ds.i), 1); return this._render(); }
-    if (a === "add-block") {
-      this._syncProfileDraft();
-      const type = this._val(`stage-${ds.i}-newblock`);
-      this._edit.draft.stages[Number(ds.i)].blocks.push(structuredClone(BLOCK_DEFAULTS[type]));
-      return this._render();
-    }
+    if (a === "add-block") return this._openBlockChooser(Number(ds.i));
     if (a === "del-block") { this._dirty = true; this._syncProfileDraft(); this._edit.draft.stages[Number(ds.i)].blocks.splice(Number(ds.j), 1); return this._render(); }
     if (a === "save-profile") {
       this._syncProfileDraft();
