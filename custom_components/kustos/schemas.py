@@ -399,11 +399,14 @@ USER_CREATE_FIELDS = {
     vol.Required("name"): cv.string,
     vol.Required("enabled", default=True): cv.boolean,
     vol.Required("rights", default=dict): USER_RIGHTS_SCHEMA,
+    # Users are auto-synced from HA persons; this is the link.
+    vol.Optional("person_entity"): vol.Any(None, cv.entity_id),
 }
 USER_UPDATE_FIELDS = {
     vol.Optional("name"): cv.string,
     vol.Optional("enabled"): cv.boolean,
     vol.Optional("rights"): USER_RIGHTS_SCHEMA,
+    vol.Optional("person_entity"): vol.Any(None, cv.entity_id),
 }
 USER_FIELDS = vol.Schema(USER_CREATE_FIELDS)
 
@@ -426,6 +429,8 @@ PERCEIVABLE_BLOCK_TYPES = frozenset(
 
 PERSON_CREATE_FIELDS = {
     vol.Required("name"): cv.string,
+    # Auto-synced from HA persons; the tracker defaults to the person entity.
+    vol.Optional("person_entity"): vol.Any(None, cv.entity_id),
     # person.* or device_tracker.*; home/not_home evidence.
     vol.Required("tracker_entity"): cv.entity_id,
     # Optional distance source (proximity sensor etc.); unit read from the
@@ -438,6 +443,7 @@ PERSON_CREATE_FIELDS = {
 }
 PERSON_UPDATE_FIELDS = {
     vol.Optional("name"): cv.string,
+    vol.Optional("person_entity"): vol.Any(None, cv.entity_id),
     vol.Optional("tracker_entity"): cv.entity_id,
     vol.Optional("distance_entity"): vol.Any(None, cv.entity_id),
     vol.Optional("away_confirm_distance_m"): vol.Any(

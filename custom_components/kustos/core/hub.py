@@ -15,6 +15,7 @@ from homeassistant.helpers import collection
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     async_track_point_in_utc_time,
+    async_track_state_added_domain,
     async_track_state_change_event,
 )
 from datetime import timedelta
@@ -92,6 +93,12 @@ class KustosHub:
             if fsm.state is not PanelState.TRIGGERED and self.engine.has_instances(panel_id):
                 await self.engine.async_stop_panel(panel_id, restore=True)
         await self.engine.async_resume()
+        # HA persons ARE the Kustos people: everyone appears automatically,
+        # only rights/PINs/presence details get configured (user decision).
+        await self.async_sync_ha_persons()
+        self._person_added_unsub = async_track_state_added_domain(
+            self._hass, "person", self._on_person_added
+        )
         await self.presence.async_start()
         # Zone changes rebuild in place; panel add/remove is handled by the
         # config entry (reload) so entities are created/removed cleanly.
@@ -112,6 +119,48 @@ class KustosHub:
         if self._config_unsub:
             self._config_unsub()
             self._config_unsub = None
+        if getattr(self, "_person_added_unsub", None):
+            self._person_added_unsub()
+            self._person_added_unsub = None
+
+    async def _on_person_added(self, event: Event) -> None:
+        await self.async_sync_ha_persons()
+
+    async def async_sync_ha_persons(self) -> None:
+        """Mirror HA persons into users (access) and persons (presence).
+
+        Create missing records, keep names in sync with the friendly name.
+        Records are never deleted here; a vanished HA person just stops
+        being listed by the frontend.
+        """
+        users_by_pe = {
+            u.get("person_entity"): u for u in self._storage.users.async_items()
+        }
+        persons_by_pe = {
+            p.get("person_entity"): p for p in self._storage.persons.async_items()
+        }
+        for state in self._hass.states.async_all("person"):
+            name = state.attributes.get("friendly_name") or state.entity_id
+            user = users_by_pe.get(state.entity_id)
+            if user is None:
+                await self._storage.users.async_create_item(
+                    {"name": name, "person_entity": state.entity_id}
+                )
+            elif user["name"] != name:
+                await self._storage.users.async_update_item(user["id"], {"name": name})
+            person = persons_by_pe.get(state.entity_id)
+            if person is None:
+                await self._storage.persons.async_create_item(
+                    {
+                        "name": name,
+                        "person_entity": state.entity_id,
+                        "tracker_entity": state.entity_id,
+                    }
+                )
+            elif person["name"] != name:
+                await self._storage.persons.async_update_item(
+                    person["id"], {"name": name}
+                )
 
     async def _on_config_change(
         self, change_type: str, item_id: str, config: dict[str, Any]

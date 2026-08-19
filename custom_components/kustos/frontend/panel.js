@@ -2,12 +2,12 @@
    Look and feel mirror HA's automation editor: sticky 56px toolbar with
    centered tabs, centered 1040px content column, editors as subpages with
    back arrow and a save pill bottom right. */
-import { STYLES, esc, icon } from "./styles.js";
+import { STYLES, PICKER_STYLES, esc, icon } from "./styles.js";
 import {
   renderLeitstand, renderBereiche, renderProfile, renderPersonen, renderBetrieb,
   ALL_MODES, ALARM_TYPES,
 } from "./views.js";
-import { renderEditor, BLOCK_DEFAULTS, EDITOR_TITLES } from "./editors.js";
+import { renderEditor, pickerValueHTML, BLOCK_DEFAULTS, EDITOR_TITLES } from "./editors.js";
 
 const TABS = {
   leitstand: ["Leitstand", renderLeitstand],
@@ -88,9 +88,18 @@ class KustosPanel extends HTMLElement {
 
   /* ---------- shared helpers (used by views/editors) ---------- */
 
+  _friendly(entityId) {
+    const st = this._hass.states[entityId];
+    return (st && st.attributes.friendly_name) || entityId;
+  }
+  _areaName(areaId) {
+    if (!areaId) return areaId;
+    const area = (this._hass.areas || {})[areaId];
+    return (area && area.name) || areaId;
+  }
   _panelName(panelId) {
     const doc = (this._data.panels || []).find((p) => p.id === panelId);
-    return doc ? (doc.scope.area_id || doc.scope.type) : panelId;
+    return doc ? (this._areaName(doc.scope.area_id) || doc.scope.type) : panelId;
   }
   _zoneName(zoneId) {
     const z = (this._data.zones || []).find((x) => x.id === zoneId);
@@ -140,11 +149,114 @@ class KustosPanel extends HTMLElement {
       else inner = TABS[this._tab][1](this);
       body = `<div class="content">${inner}</div>`;
     }
-    this.shadowRoot.innerHTML = `<style>${STYLES}</style>${toolbar}${body}`;
-    for (const el of this.shadowRoot.querySelectorAll("[data-action]")) {
-      el.onclick = () => this._onAction(el.dataset);
-    }
+    this.shadowRoot.innerHTML = `<style>${STYLES}${PICKER_STYLES}</style>${toolbar}${body}`;
+    this._bindActions(this.shadowRoot);
     this._updateCountdowns();
+  }
+
+  _bindActions(root) {
+    for (const el of root.querySelectorAll("[data-action]")) {
+      el.onclick = (ev) => {
+        ev.stopPropagation();
+        if (el.dataset.action === "chip-del") {
+          const field = el.closest(".picker-field");
+          if (field) {
+            const values = (this._q(field.dataset.input)?.value || "")
+              .split(",").map((s) => s.trim()).filter(Boolean)
+              .filter((v) => v !== el.dataset.value);
+            this._updatePickerDisplay(field.dataset, values);
+          }
+          return;
+        }
+        this._onAction(el.dataset);
+      };
+    }
+  }
+
+  /* ---------- picker ---------- */
+
+  _pickerOptions(ds) {
+    if (ds.kind === "area") {
+      return Object.values(this._hass.areas || {}).map((a) =>
+        ({ value: a.area_id, primary: a.name || a.area_id, secondary: a.area_id }));
+    }
+    if (ds.kind === "service") {
+      const notify = Object.keys((this._hass.services || {}).notify || {})
+        .map((s) => "notify." + s);
+      return [...notify, "persistent_notification.create"]
+        .map((v) => ({ value: v, primary: v, secondary: "" }));
+    }
+    const domains = (ds.domains || "").split(",").filter(Boolean);
+    return Object.keys(this._hass.states)
+      .filter((e) => domains.some((d) => e.startsWith(d + ".")))
+      .map((e) => ({ value: e, primary: this._friendly(e), secondary: e }))
+      .sort((a, b) => a.primary.localeCompare(b.primary));
+  }
+
+  _updatePickerDisplay(ds, values) {
+    const input = this._q(ds.input);
+    input.value = values.join(",");
+    const display = this._q(ds.input + "-display");
+    if (display) {
+      display.innerHTML = pickerValueHTML(
+        this, values, ds.multi === "1", ds.kind, ds.placeholder || "Auswählen");
+      this._bindActions(display);
+    }
+  }
+
+  _openPicker(ds) {
+    const input = this._q(ds.input);
+    const multi = ds.multi === "1";
+    let selected = new Set(input.value.split(",").map((s) => s.trim()).filter(Boolean));
+    const options = this._pickerOptions(ds);
+    const ov = document.createElement("div");
+    ov.className = "overlay";
+    ov.innerHTML = `<div class="picker-dialog">
+      <div class="picker-title">${esc(ds.label || "Auswählen")}</div>
+      <div class="picker-search"><input type="text" placeholder="Suchen..."></div>
+      <div class="picker-list"></div>
+      <div class="picker-actions">
+        <button class="btn" data-x="cancel">Abbrechen</button>
+        ${multi ? '<button class="btn accent" data-x="done">Übernehmen</button>' : ""}
+      </div></div>`;
+    const listEl = ov.querySelector(".picker-list");
+    const renderList = (q = "") => {
+      const ql = q.toLowerCase();
+      listEl.innerHTML = options
+        .filter((o) => !ql || o.primary.toLowerCase().includes(ql)
+          || o.value.toLowerCase().includes(ql))
+        .slice(0, 300)
+        .map((o) => `
+          <div class="picker-item ${selected.has(o.value) ? "selected" : ""}" data-v="${esc(o.value)}">
+            <span class="pi-body"><div>${esc(o.primary)}</div>
+              ${o.secondary && o.secondary !== o.primary
+                ? `<div class="pi-sec">${esc(o.secondary)}</div>` : ""}</span>
+            <span class="pi-check">${icon("check", 20)}</span>
+          </div>`).join("")
+        || `<div class="empty">Keine Treffer.</div>`;
+      for (const item of listEl.querySelectorAll(".picker-item")) {
+        item.onclick = () => {
+          const v = item.dataset.v;
+          if (multi) {
+            if (selected.has(v)) selected.delete(v); else selected.add(v);
+            item.classList.toggle("selected");
+          } else {
+            selected = new Set([v]);
+            commit();
+          }
+        };
+      }
+    };
+    const commit = () => { this._updatePickerDisplay(ds, [...selected]); ov.remove(); };
+    ov.querySelector('[data-x="cancel"]').onclick = () => ov.remove();
+    const done = ov.querySelector('[data-x="done"]');
+    if (done) done.onclick = commit;
+    ov.onclick = (ev) => { if (ev.target === ov) ov.remove(); };
+    const search = ov.querySelector(".picker-search input");
+    search.oninput = () => renderList(search.value);
+    renderList();
+    this.shadowRoot.appendChild(ov);
+    search.focus();
   }
 
   /* ---------- actions ---------- */
@@ -154,6 +266,7 @@ class KustosPanel extends HTMLElement {
     if (a === "tab") { this._tab = ds.tab; this._edit = null; this._render(); return; }
     if (a === "cancel") { this._edit = null; this._refresh(); return; }
     if (a === "service") return this._service(ds.service, ds.panel);
+    if (a === "pick") return this._openPicker(ds);
     if (a === "walk") {
       await this._ws("kustos/walk_test", { panel_id: ds.panel, action: ds.walk });
       return this._refresh();
@@ -256,24 +369,33 @@ class KustosPanel extends HTMLElement {
       return;
     }
 
-    // Benutzer
-    if (a === "new-user") { this._edit = { kind: "user", draft: {} }; return this._render(); }
-    if (a === "edit-user") { this._edit = { kind: "user", draft: structuredClone((this._data.users || []).find((u) => u.id === ds.id)) }; return this._render(); }
-    if (a === "del-user") {
-      if (!confirm("Benutzer löschen?")) return;
-      await this._ws("kustos/users/delete", { user_id: ds.id }); return this._refresh();
+    // Personen (automatisch aus HA; nur Rechte/PIN/Anwesenheit editierbar)
+    if (a === "edit-member") {
+      const user = structuredClone((this._data.users || []).find((u) => u.id === ds.id));
+      const person = structuredClone((this._data.persons || [])
+        .find((pe) => pe.person_entity === user.person_entity) || null);
+      this._edit = { kind: "member", draft: { id: user.id, user, person } };
+      return this._render();
     }
-    if (a === "save-user") {
+    if (a === "save-member") {
+      const { user, person } = this._edit.draft;
       const panels = this._chk("u-allpanels") ? null
         : [...this.shadowRoot.querySelectorAll(".u-panel:checked")].map((x) => x.value);
-      const payload = {
-        name: this._val("u-name"), enabled: this._chk("u-enabled"),
+      const res = await this._ws("kustos/users/update", {
+        user_id: user.id,
+        enabled: this._chk("u-enabled"),
         rights: { can_arm: this._chk("u-arm"), can_disarm: this._chk("u-disarm"), panels },
-      };
-      const res = ds.id
-        ? await this._ws("kustos/users/update", { user_id: ds.id, ...payload })
-        : await this._ws("kustos/users/create", payload);
-      if (res.ok) { this._edit = null; this._refresh(); }
+      });
+      let ok = res.ok;
+      if (ok && person) {
+        const res2 = await this._ws("kustos/persons/update", {
+          person_id: person.id,
+          distance_entity: this._val("pe-dist") || null,
+          away_confirm_distance_m: this._num("pe-threshold"),
+        });
+        ok = res2.ok;
+      }
+      if (ok) { this._edit = null; this._refresh(); }
       return;
     }
     if (a === "set-pin") {
@@ -283,26 +405,6 @@ class KustosPanel extends HTMLElement {
       if (pin === null) return;
       await this._ws("kustos/users/set_pin", { user_id: ds.id, pin: pin || null, kind: ds.kind });
       return this._refresh();
-    }
-
-    // Personen
-    if (a === "new-person") { this._edit = { kind: "person", draft: {} }; return this._render(); }
-    if (a === "edit-person") { this._edit = { kind: "person", draft: structuredClone((this._data.persons || []).find((p) => p.id === ds.id)) }; return this._render(); }
-    if (a === "del-person") {
-      if (!confirm("Person löschen?")) return;
-      await this._ws("kustos/persons/delete", { person_id: ds.id }); return this._refresh();
-    }
-    if (a === "save-person") {
-      const payload = {
-        name: this._val("pe-name"), tracker_entity: this._val("pe-tracker"),
-        distance_entity: this._val("pe-dist") || null,
-        away_confirm_distance_m: this._num("pe-threshold"),
-      };
-      const res = ds.id
-        ? await this._ws("kustos/persons/update", { person_id: ds.id, ...payload })
-        : await this._ws("kustos/persons/create", payload);
-      if (res.ok) { this._edit = null; this._refresh(); }
-      return;
     }
 
     // Regeln

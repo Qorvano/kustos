@@ -16,6 +16,7 @@ const ICON_PATHS = {
   save: "M15,9H5V5H15M12,19A3,3 0 0,1 9,16A3,3 0 0,1 12,13A3,3 0 0,1 15,16A3,3 0 0,1 12,19M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3Z",
   close: "M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z",
   "chevron-right": "M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z",
+  check: "M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z",
   shield: "M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1Z",
   account: "M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z",
   bell: "M21,19V20H3V19L5,17V11C5,7.9 7.03,5.17 10,4.29C10,4.19 10,4.1 10,4A2,2 0 0,1 12,2A2,2 0 0,1 14,4C14,4.1 14,4.19 14,4.29C16.97,5.17 19,7.9 19,11V17L21,19M14,21A2,2 0 0,1 12,23A2,2 0 0,1 10,21",
@@ -204,4 +205,45 @@ export const STYLES = `
   fieldset.block { border: 1px solid var(--k-divider); border-radius: 8px;
                    margin: 0 0 12px; padding: 12px; }
   fieldset.block legend { font-weight: 500; padding: 0 6px; }
+`;
+
+/* ---------- Picker overlay + chips (nachgereicht: Auswahl statt Tipperei) */
+export const PICKER_STYLES = `
+  .overlay { position: fixed; inset: 0; z-index: 20;
+    background: rgba(0,0,0,.32); display: flex; align-items: center; justify-content: center; }
+  .picker-dialog { width: min(480px, calc(100vw - 32px)); max-height: 72vh;
+    display: flex; flex-direction: column; overflow: hidden;
+    background: var(--card-background-color, #fff);
+    border-radius: var(--ha-card-border-radius, 12px);
+    box-shadow: var(--ha-box-shadow-l, 0 8px 32px rgba(0,0,0,.35)); }
+  .picker-title { padding: 14px 16px 0; font-size: 18px; }
+  .picker-search { padding: 10px 16px 12px; border-bottom: 1px solid var(--k-divider); }
+  .picker-search input { width: 100%; height: 40px; padding: 0 14px; font: inherit;
+    font-size: 15px; color: var(--primary-text-color);
+    background: var(--k-fill); border: none; border-radius: 9999px; outline: none; }
+  .picker-list { overflow-y: auto; flex: 1; }
+  .picker-item { display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+    cursor: pointer; min-height: 52px; }
+  .picker-item:hover { background: color-mix(in srgb, var(--k-primary) 8%, transparent); }
+  .picker-item .pi-body { flex: 1; min-width: 0; }
+  .picker-item .pi-sec { font-size: 12px; color: var(--k-secondary-text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .picker-item .pi-check { width: 22px; color: var(--k-primary); visibility: hidden; }
+  .picker-item.selected .pi-check { visibility: visible; }
+  .picker-actions { border-top: 1px solid var(--k-divider); padding: 8px;
+    display: flex; justify-content: flex-end; gap: 4px; }
+  .picker-field { cursor: pointer; }
+  .picker-field .value-display { display: flex; align-items: center; gap: 8px;
+    min-height: 24px; font-size: 16px; }
+  .picker-field .value-display .ph { color: var(--k-label); }
+  .picker-field .value-display .vd-sec { font-size: 12px; color: var(--k-secondary-text); }
+  .picker-field .chev { margin-left: auto; color: var(--k-secondary-text); flex-shrink: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; align-items: center; }
+  .chip-item { display: inline-flex; align-items: center; gap: 4px;
+    background: color-mix(in srgb, var(--k-primary) 12%, transparent);
+    border-radius: 9999px; padding: 3px 4px 3px 12px; font-size: 13px; }
+  .chip-item .chip-x { border: none; background: none; cursor: pointer; padding: 0;
+    width: 20px; height: 20px; border-radius: 50%; display: inline-flex;
+    align-items: center; justify-content: center; color: inherit; }
+  .chip-item .chip-x:hover { background: color-mix(in srgb, currentColor 15%, transparent); }
 `;

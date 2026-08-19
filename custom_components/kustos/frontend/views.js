@@ -56,7 +56,7 @@ export function renderLeitstand(ctx) {
       ? `<p class="muted">Überbrückt: ${p.bypassed_zones.map((z) => esc(ctx._zoneName(z))).join(", ")}</p>` : "";
     return `
       <div class="card">
-        <div class="card-header">${esc(p.area_id || p.panel_id)}
+        <div class="card-header">${esc(ctx._areaName(p.area_id) || p.panel_id)}
           ${walk ? `<span class="chip">Walk-Test läuft</span>` : ""}</div>
         <div class="card-content">
           <div class="big-state ${p.state}">${STATE_LABELS[p.state] || p.state}
@@ -99,7 +99,7 @@ export function renderBereiche(ctx) {
       .map(([m]) => MODE_LABELS[m] || m).join(", ");
     const zoneRows = zones.map((z) => listRow(
       "shield",
-      esc(z.name || z.entity_id),
+      esc(z.name || ctx._friendly(z.entity_id)),
       `${esc(z.entity_id)} | ${ALARM_TYPE_LABELS[z.alarm_type] || z.alarm_type} | ${
         Object.entries(z.modes).map(([m, r]) => `${MODE_LABELS[m] || m}: ${r}`).join(", ") || "keine Rolle"}`,
       rowActions(
@@ -108,7 +108,7 @@ export function renderBereiche(ctx) {
     )).join("");
     return `
       <div class="card">
-        <div class="card-header">${esc(p.scope.area_id || p.scope.type)}
+        <div class="card-header">${esc(ctx._areaName(p.scope.area_id) || p.scope.type)}
           <span class="hint">${modes || "keine Modi aktiviert"}</span></div>
         ${zones.length ? `<div class="rows">${zoneRows}</div>`
           : `<div class="empty">Keine Zonen in diesem Bereich.</div>`}
@@ -130,7 +130,8 @@ export function renderProfile(ctx) {
   const cards = (ctx._data.profiles || []).map((prof) => {
     const stages = prof.stages.map((s, i) => {
       const blocks = s.blocks.map((b) => {
-        const targets = (b.targets || b.media_targets || []).join(", ");
+        const targets = (b.targets || b.media_targets || [])
+          .map((t) => ctx._friendly(t)).join(", ");
         return `${BLOCK_LABELS[b.type] || b.type}${targets ? ` → ${esc(targets)}` : ""}`;
       }).join(" · ") || "keine Bausteine";
       return listRow("bell", `Stufe ${i + 1} <span class="chip">${
@@ -152,31 +153,35 @@ export function renderProfile(ctx) {
 /* ------------------------------------------------------------------ */
 
 export function renderPersonen(ctx) {
-  const users = (ctx._data.users || []).map((u) => {
-    const panels = u.rights.panels === null ? "alle Bereiche"
-      : u.rights.panels.map((p) => esc(ctx._panelName(p))).join(", ");
-    const rights = [u.rights.can_arm ? "scharf" : null, u.rights.can_disarm ? "unscharf" : null]
-      .filter(Boolean).join(" + ") || "keine Rechte";
-    return listRow("account",
-      `${esc(u.name)}${u.enabled ? "" : ' <span class="chip">deaktiviert</span>'}`,
-      `${rights} | ${panels}`,
-      `<span class="meta">
-        <button class="btn" data-action="set-pin" data-id="${u.id}" data-kind="normal">PIN</button>
-        <button class="btn" data-action="set-pin" data-id="${u.id}" data-kind="duress">Duress</button>
-        <button class="icon-btn" title="Bearbeiten" data-action="edit-user" data-id="${u.id}">${icon("pencil",20)}</button>
-        <button class="icon-btn" title="Löschen" data-action="del-user" data-id="${u.id}">${icon("delete",20)}</button>
-      </span>`);
-  }).join("");
+  const personByEntity = {};
+  for (const p of (ctx._data.persons || [])) {
+    if (p.person_entity) personByEntity[p.person_entity] = p;
+  }
   const phases = {};
   for (const p of (ctx._data.state.presence || [])) phases[p.person_id] = p.phase;
-  const persons = (ctx._data.persons || []).map((p) => listRow("account",
-    esc(p.name),
-    `${esc(p.tracker_entity)}${p.distance_entity ? ` | ${esc(p.distance_entity)}` : ""} | Schwelle ${
-      p.away_confirm_distance_m || "Standard"} m | ${PHASE_LABELS[phases[p.id]] || "-"}`,
-    rowActions(
-      { action: "edit-person", attrs: `data-id="${p.id}"` },
-      { action: "del-person", attrs: `data-id="${p.id}"` })
-  )).join("");
+
+  const members = (ctx._data.users || [])
+    .filter((u) => u.person_entity)
+    .map((u) => {
+      const person = personByEntity[u.person_entity];
+      const rights = [u.rights.can_arm ? "scharf" : null, u.rights.can_disarm ? "unscharf" : null]
+        .filter(Boolean).join(" + ") || "keine Rechte";
+      const panels = u.rights.panels === null ? "alle Bereiche"
+        : u.rights.panels.map((p) => esc(ctx._panelName(p))).join(", ");
+      const presence = person
+        ? ` | ${PHASE_LABELS[phases[person.id]] || "-"}${person.distance_entity
+            ? ` | Distanz: ${esc(ctx._friendly(person.distance_entity))}` : ""}`
+        : "";
+      return listRow("account",
+        `${esc(u.name)}${u.enabled ? "" : ' <span class="chip">deaktiviert</span>'}`,
+        `${rights} | ${panels}${presence}`,
+        `<span class="meta">
+          <button class="btn" data-action="set-pin" data-id="${u.id}" data-kind="normal">PIN</button>
+          <button class="btn" data-action="set-pin" data-id="${u.id}" data-kind="duress">Duress</button>
+          <button class="icon-btn" title="Bearbeiten" data-action="edit-member" data-id="${u.id}">${icon("pencil", 20)}</button>
+        </span>`);
+    }).join("");
+
   const rules = (ctx._data.rules || []).map((r) => listRow("cog",
     `${esc(r.name)}${r.enabled ? "" : ' <span class="chip">deaktiviert</span>'}`,
     `${r.panel_id === "master" ? "Gesamtsystem" : esc(ctx._panelName(r.panel_id))} | ${
@@ -186,15 +191,17 @@ export function renderPersonen(ctx) {
       { action: "edit-rule", attrs: `data-id="${r.id}"` },
       { action: "del-rule", attrs: `data-id="${r.id}"` })
   )).join("");
-  const section = (title, rows, emptyText, action, label) => `
-    <div class="card"><div class="card-header">${title}</div>
-      ${rows ? `<div class="rows">${rows}</div>` : `<div class="empty">${emptyText}</div>`}
-      <div class="card-actions"><button class="btn" data-action="${action}">${icon("plus",18)} ${label}</button></div>
-    </div>`;
+
   return `<div class="cards">
-    ${section("Benutzer und Zugang", users, "Keine Benutzer angelegt.", "new-user", "Benutzer")}
-    ${section("Anwesenheits-Personen", persons, "Keine Personen angelegt.", "new-person", "Person")}
-    ${section("Automatik-Regeln", rules, "Keine Regeln angelegt.", "new-rule", "Regel")}
+    <div class="card"><div class="card-header">Personen
+        <span class="hint">kommen automatisch aus Home Assistant</span></div>
+      ${members ? `<div class="rows">${members}</div>`
+        : `<div class="empty">Keine HA-Personen gefunden. Lege Personen unter Einstellungen, Personen an.</div>`}
+    </div>
+    <div class="card"><div class="card-header">Automatik-Regeln</div>
+      ${rules ? `<div class="rows">${rules}</div>` : `<div class="empty">Keine Regeln angelegt.</div>`}
+      <div class="card-actions"><button class="btn" data-action="new-rule">${icon("plus", 18)} Regel</button></div>
+    </div>
   </div>`;
 }
 
@@ -204,7 +211,7 @@ export function renderBetrieb(ctx) {
   const walk = (ctx._data.panels || []).map((p) => {
     const info = (ctx._data.state.walk_tests || {})[p.id];
     return listRow("shield",
-      `Walk-Test: ${esc(p.scope.area_id || p.scope.type)}`,
+      `Walk-Test: ${esc(ctx._areaName(p.scope.area_id) || p.scope.type)}`,
       info
         ? `läuft, Ende <span data-ends-at="${info.ends_at}"></span> | getestet: ${
             info.tested.map((z) => esc(ctx._zoneName(z))).join(", ") || "noch keine Zone"}`

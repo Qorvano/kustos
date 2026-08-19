@@ -1,6 +1,6 @@
-/* Editor subpages (Automations-Editor-Stil): centered column of section
-   cards, save pill bottom right. Render functions + form field helpers.
-   `ctx` is the panel component. */
+/* Editor subpages: centered column of section cards, save pill bottom right.
+   Every value that exists in the system is PICKED, never typed (entity
+   picker with search and friendly names, like the automation editor). */
 import { esc, icon } from "./styles.js";
 import {
   ALARM_TYPES, ALARM_TYPE_LABELS, ALL_MODES, BLOCK_LABELS, MODE_LABELS,
@@ -15,7 +15,7 @@ export const BLOCK_DEFAULTS = {
                   brightness_pct: 100, period_s: 2.0, fade_s: 0.4, non_color_behavior: "off" },
   lights_on:    { type: "lights_on", targets: [], brightness_pct: 100, refresh_interval_s: 0 },
   sound:        { type: "sound", targets: [], retrigger_interval_s: 30, max_duration_s: 180 },
-  announce_loop:{ type: "announce_loop", notify_service: "notify.", message: "",
+  announce_loop:{ type: "announce_loop", notify_service: "", message: "",
                   interval_s: 15, media_targets: [], volume_pct: 80, volume_fallback_pct: 30 },
   notify:       { type: "notify", service: "persistent_notification.create", title: "", message: "" },
   lock:         { type: "lock", targets: [], action: "lock" },
@@ -25,18 +25,16 @@ export const EDITOR_TITLES = {
   panel: ["Neuer Bereich", "Bereich bearbeiten"],
   zone: ["Neue Zone", "Zone bearbeiten"],
   profile: ["Neues Profil", "Profil bearbeiten"],
-  user: ["Neuer Benutzer", "Benutzer bearbeiten"],
-  person: ["Neue Person", "Person bearbeiten"],
+  member: ["", "Person bearbeiten"],
   rule: ["Neue Regel", "Regel bearbeiten"],
 };
 
-/* ---------- form helpers ---------- */
+/* ---------- basic fields ---------- */
 
 export const textField = (id, label, value, opts = {}) => `
   <div class="field"><label for="${id}">${label}</label>
     <input type="${opts.type || "text"}" id="${id}" value="${esc(value ?? "")}"
-      ${opts.list ? `list="${opts.list}"` : ""} ${opts.step ? `step="${opts.step}"` : ""}
-      placeholder="${esc(opts.placeholder || "")}"></div>`;
+      ${opts.step ? `step="${opts.step}"` : ""} placeholder="${esc(opts.placeholder || "")}"></div>`;
 
 export const numField = (id, label, value, placeholder = "") =>
   textField(id, label, value ?? "", { type: "number", step: "0.1", placeholder });
@@ -47,11 +45,11 @@ export const selectField = (id, label, options, selected) => `
       `<option value="${esc(v)}" ${String(v) === String(selected) ? "selected" : ""}>${esc(text)}</option>`).join("")}
     </select></div>`;
 
-export const switchRow = (id, label, checked, secondary = "", cls = "") => `
+export const switchRow = (id, label, checked, secondary = "") => `
   <div class="switch-row">
     <span class="body"><div>${label}</div>
       ${secondary ? `<div class="secondary">${secondary}</div>` : ""}</span>
-    <label class="switch"><input type="checkbox" id="${id}" class="${cls}" ${checked ? "checked" : ""}>
+    <label class="switch"><input type="checkbox" id="${id}" ${checked ? "checked" : ""}>
       <span class="track"></span></label>
   </div>`;
 
@@ -65,13 +63,53 @@ const card = (title, content, hint = "") => `
     ${hint ? `<span class="hint">${hint}</span>` : ""}</div>
   <div class="card-content">${content}</div></div>`;
 
+/* ---------- picker field ---------- */
+
+const displayName = (ctx, kind, value) => {
+  if (kind === "area") return ctx._areaName(value);
+  if (kind === "entity") return ctx._friendly(value);
+  return value;
+};
+
+export function pickerValueHTML(ctx, values, multi, kind, placeholder) {
+  let inner;
+  if (!values.length) {
+    inner = `<span class="ph">${esc(placeholder)}</span>`;
+  } else if (multi) {
+    inner = `<span class="chips">${values.map((v) => `
+      <span class="chip-item">${esc(displayName(ctx, kind, v))}
+        <button class="chip-x" title="Entfernen" data-action="chip-del"
+          data-value="${esc(v)}">${icon("close", 14)}</button></span>`).join("")}</span>`;
+  } else {
+    const v = values[0];
+    const name = displayName(ctx, kind, v);
+    inner = `<span>${esc(name)}</span>${name !== v ? `<span class="vd-sec">${esc(v)}</span>` : ""}`;
+  }
+  return `${inner}<span class="chev">${icon("chevron-right", 20)}</span>`;
+}
+
+export function pickerField(ctx, id, label, value, opts = {}) {
+  const multi = !!opts.multi;
+  const values = Array.isArray(value) ? value : (value ? [value] : []);
+  const placeholder = opts.placeholder || "Auswählen";
+  return `
+    <div class="field picker-field" data-action="pick" data-input="${id}"
+         data-kind="${opts.kind || "entity"}" data-domains="${(opts.domains || []).join(",")}"
+         data-multi="${multi ? 1 : 0}" data-label="${esc(label)}"
+         data-placeholder="${esc(placeholder)}">
+      <label>${label}</label>
+      <input type="hidden" id="${id}" value="${esc(values.join(","))}">
+      <span class="value-display" id="${id}-display">${pickerValueHTML(ctx, values, multi, opts.kind || "entity", placeholder)}</span>
+    </div>`;
+}
+
 /* ---------- editors ---------- */
 
 export function renderEditor(ctx) {
   const { kind, draft } = ctx._edit;
   const body = {
     panel: panelEditor, zone: zoneEditor, profile: profileEditor,
-    user: userEditor, person: personEditor, rule: ruleEditor,
+    member: memberEditor, rule: ruleEditor,
   }[kind](ctx, draft);
   return `<div class="cards">${body}</div>
     <button class="fab" data-action="save-${kind}" data-id="${draft.id || ""}"
@@ -80,8 +118,6 @@ export function renderEditor(ctx) {
 }
 
 function panelEditor(ctx, doc) {
-  const areas = Object.values(ctx._hass.areas || {})
-    .map((a) => `<option value="${esc(a.area_id)}">`).join("");
   const modes = ALL_MODES.map((m) => {
     const cfg = (doc.modes || {})[m] || {};
     return `<div style="margin-bottom:8px;">
@@ -93,15 +129,15 @@ function panelEditor(ctx, doc) {
       </div></div>`;
   }).join("");
   const opts = doc.options || {};
-  const profileOptions = (sel) => [["", "kein Profil"],
+  const profileOptions = () => [["", "kein Profil"],
     ...(ctx._data.profiles || []).map((pr) => [pr.id, pr.name])];
   const assignments = `<div class="form-grid">${ALARM_TYPES.map((t) =>
     selectField(`prof-${t}`, ALARM_TYPE_LABELS[t],
       profileOptions(), ((doc.alarm_types || {})[t] || {}).profile_id || "")).join("")}</div>`;
   return `
     ${card("Bereich", `<div class="form">
-      ${textField("f-area", "Home-Assistant-Bereich (area_id)", doc.scope?.area_id, { list: "dl-areas" })}
-      <datalist id="dl-areas">${areas}</datalist></div>`)}
+      ${pickerField(ctx, "f-area", "Home-Assistant-Bereich", doc.scope?.area_id, { kind: "area" })}
+    </div>`)}
     ${card("Modi", modes, "Zeiten leer = zentrale Standardwerte")}
     ${card("Optionen", `
       ${switchRow("f-codearm", "Code zum Scharfschalten", opts.code_arm_required)}
@@ -121,8 +157,8 @@ function zoneEditor(ctx, doc) {
   const o = doc.options || {};
   return `
     ${card("Zone", `<div class="form">
-      ${textField("z-entity", "Entität", doc.entity_id, { list: "dl-zone-entities" })}
-      ${ctx._datalist("dl-zone-entities", ["binary_sensor", "input_boolean", "switch", "sensor"])}
+      ${pickerField(ctx, "z-entity", "Entität", doc.entity_id,
+        { domains: ["binary_sensor", "input_boolean", "switch", "sensor"] })}
       ${textField("z-name", "Name (optional)", doc.name)}
       ${selectField("z-type", "Alarmtyp", ALARM_TYPES.map((t) => [t, ALARM_TYPE_LABELS[t]]),
         doc.alarm_type || "burglary")}</div>`,
@@ -141,43 +177,44 @@ function zoneEditor(ctx, doc) {
 
 function blockFields(ctx, b, i, j) {
   const id = (f) => `b-${i}-${j}-${f}`;
-  const list = (f, label, dl) => textField(id(f), label,
-    Array.isArray(b[f]) ? b[f].join(", ") : b[f], { list: dl });
+  const pick = (f, label, domains) => pickerField(ctx, id(f), label, b[f] || [],
+    { domains, multi: true });
   const num = (f, label) => numField(id(f), label, b[f]);
   const txt = (f, label) => textField(id(f), label, b[f]);
   switch (b.type) {
     case "flash_lights": {
       const hex = "#" + (b.color_rgb || [255, 0, 0])
         .map((c) => c.toString(16).padStart(2, "0")).join("");
-      return `<div class="form-grid">
-        ${list("targets", "Ziele (Komma-Liste)", "dl-lights")}
+      return `${pick("targets", "Lampen", ["light", "switch"])}
+        <div class="form-grid" style="margin-top:12px;">
         <div class="field"><label>Farbe</label>
           <input type="color" id="${id("color")}" value="${hex}" style="height:24px;padding:0;border:none;background:transparent;"></div>
         ${num("brightness_pct", "Helligkeit %")} ${num("period_s", "Periode s")}
         ${num("fade_s", "Fade s")}
-        ${selectField(id("ncb"), "Nicht-farbfähige Ziele",
+        ${selectField(id("ncb"), "Nicht-farbfähige Lampen",
           [["off", "ausschalten"], ["hard_blink", "hart mitblinken"], ["ignore", "unverändert"]],
           b.non_color_behavior)}</div>`;
     }
     case "lights_on":
-      return `<div class="form-grid">${list("targets", "Ziele", "dl-lights")}
-        ${num("brightness_pct", "Helligkeit %")}
+      return `${pick("targets", "Lampen", ["light", "switch"])}
+        <div class="form-grid" style="margin-top:12px;">${num("brightness_pct", "Helligkeit %")}
         ${num("refresh_interval_s", "Refresh s (0 = aus)")}</div>`;
     case "sound":
-      return `<div class="form-grid">${list("targets", "Ziele", "dl-sound")}
-        ${num("retrigger_interval_s", "Nachtrigger s")}
+      return `${pick("targets", "Alarmgeber", ["siren", "switch", "input_boolean", "button", "input_button"])}
+        <div class="form-grid" style="margin-top:12px;">${num("retrigger_interval_s", "Nachtrigger s")}
         ${num("max_duration_s", "Maximaldauer s (Pflicht)")}</div>`;
     case "announce_loop":
-      return `<div class="form-grid">${txt("notify_service", "Notify-Service")}
-        ${txt("message", "Ansagetext")} ${num("interval_s", "Intervall s")}
-        ${list("media_targets", "Player", "dl-media")}
+      return `${pickerField(ctx, id("notify_service"), "Notify-Service", b.notify_service, { kind: "service" })}
+        <div class="form" style="margin-top:12px;">${txt("message", "Ansagetext")}</div>
+        ${pick("media_targets", "Player (Lautstärke)", ["media_player"])}
+        <div class="form-grid" style="margin-top:12px;">${num("interval_s", "Intervall s")}
         ${num("volume_pct", "Lautstärke %")} ${num("volume_fallback_pct", "Fallback %")}</div>`;
     case "notify":
-      return `<div class="form-grid">${txt("service", "Service")}
-        ${txt("title", "Titel")} ${txt("message", "Text")}</div>`;
+      return `${pickerField(ctx, id("service"), "Service", b.service, { kind: "service" })}
+        <div class="form-grid" style="margin-top:12px;">${txt("title", "Titel")} ${txt("message", "Text")}</div>`;
     case "lock":
-      return `<div class="form-grid">${list("targets", "Schlösser", "dl-locks")}
-        ${selectField(id("action"), "Aktion",
+      return `${pick("targets", "Schlösser", ["lock"])}
+        <div class="form-grid" style="margin-top:12px;">${selectField(id("action"), "Aktion",
           [["lock", "verriegeln"], ["unlock", "öffnen (nur Feuer/CO wirksam)"]], b.action)}</div>`;
   }
   return "";
@@ -201,48 +238,42 @@ function profileEditor(ctx, doc) {
       `<button class="btn danger" data-action="del-stage" data-i="${i}">Stufe entfernen</button>`);
   }).join("");
   return `
-    ${ctx._datalist("dl-lights", ["light", "switch"])}
-    ${ctx._datalist("dl-sound", ["siren", "switch", "input_boolean", "button", "input_button"])}
-    ${ctx._datalist("dl-media", ["media_player"])}
-    ${ctx._datalist("dl-locks", ["lock"])}
     ${card("Profil", `<div class="form">${textField("p-name", "Name", doc.name)}</div>`,
       "Stufen laufen als Zeitachse ab Alarmbeginn")}
     ${stages}
     <div><button class="btn outlined" data-action="add-stage">${icon("plus", 18)} Stufe hinzufügen</button></div>`;
 }
 
-function userEditor(ctx, doc) {
-  const r = doc.rights || {};
-  const panelChecks = (ctx._data.panels || []).map((p) =>
-    checkChip("u-panel", p.id, ctx._panelName(p.id),
-      r.panels && r.panels.includes(p.id))).join("");
+function memberEditor(ctx, draft) {
+  const u = draft.user;
+  const p = draft.person || {};
+  const r = u.rights || {};
+  const panelChecks = (ctx._data.panels || []).map((pl) =>
+    checkChip("u-panel", pl.id, ctx._panelName(pl.id),
+      r.panels && r.panels.includes(pl.id))).join("");
   return `
-    ${card("Benutzer", `<div class="form">${textField("u-name", "Name", doc.name)}</div>
-      ${switchRow("u-enabled", "Aktiv", doc.enabled !== false)}`)}
-    ${card("Rechte", `
+    ${card(esc(u.name), switchRow("u-enabled", "Aktiv", u.enabled !== false,
+      "kommt automatisch aus Home Assistant"),
+      esc(u.person_entity || ""))}
+    ${card("Zugang", `
       ${switchRow("u-arm", "Darf scharfschalten", r.can_arm !== false)}
       ${switchRow("u-disarm", "Darf entschärfen", r.can_disarm !== false)}
       ${switchRow("u-allpanels", "Alle Bereiche", r.panels == null)}
       <div style="margin-top:8px;">${panelChecks}</div>`,
-      "PIN und Duress-PIN setzt du in der Liste am Benutzer")}`;
-}
-
-function personEditor(ctx, doc) {
-  return `
-    ${ctx._datalist("dl-trackers", ["person", "device_tracker"])}
-    ${ctx._datalist("dl-distance", ["sensor", "input_number"])}
-    ${card("Person", `<div class="form">
-      ${textField("pe-name", "Name", doc.name)}
-      ${textField("pe-tracker", "Tracker-Entität (home/not_home)", doc.tracker_entity, { list: "dl-trackers" })}
-      ${textField("pe-dist", "Distanz-Entität (optional)", doc.distance_entity, { list: "dl-distance" })}
-      ${numField("pe-threshold", "Weg-Schwelle in Metern", doc.away_confirm_distance_m, "Standard")}
+      "PIN und Duress-PIN setzt du in der Personen-Liste")}
+    ${card("Anwesenheit", `<div class="form">
+      ${pickerField(ctx, "pe-dist", "Distanz-Entität (optional)", p.distance_entity,
+        { domains: ["sensor", "input_number", "number"] })}
+      ${numField("pe-threshold", "Weg-Schwelle in Metern", p.away_confirm_distance_m, "Standard")}
     </div>`, "ohne Distanzquelle zählt anhaltendes not_home")}`;
 }
 
 function ruleEditor(ctx, doc) {
   const arm = doc.arm || {};
-  const personChecks = (ctx._data.persons || []).map((p) =>
-    checkChip("r-person", p.id, p.name, doc.persons && doc.persons.includes(p.id))).join("");
+  const personChecks = (ctx._data.persons || [])
+    .filter((p) => p.person_entity)
+    .map((p) => checkChip("r-person", p.id, p.name,
+      doc.persons && doc.persons.includes(p.id))).join("");
   return `
     ${card("Regel", `<div class="form">${textField("r-name", "Name", doc.name)}</div>
       ${switchRow("r-enabled", "Aktiv", doc.enabled !== false)}`)}
@@ -258,5 +289,5 @@ function ruleEditor(ctx, doc) {
       doc.return_action?.disarm !== false,
       "nur nach bestätigter Abwesenheit im selben Trip; nie während Alarm oder Eintrittsverzögerung"))}
     ${card("Personen", `${switchRow("r-allpersons", "Alle Personen", doc.persons == null)}
-      <div style="margin-top:8px;">${personChecks || '<span class="muted">Noch keine Personen angelegt.</span>'}</div>`)}`;
+      <div style="margin-top:8px;">${personChecks || '<span class="muted">Keine HA-Personen gefunden.</span>'}</div>`)}`;
 }

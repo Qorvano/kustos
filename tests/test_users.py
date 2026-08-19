@@ -217,3 +217,29 @@ async def test_set_pin_ws_validates_and_stores_hash_only(hass, hass_ws_client):
     record = storage.pins[user["id"]]["normal"]
     assert "246810" not in str(record)
     assert verify_pin("246810", record)
+
+
+async def test_ha_persons_are_synced_automatically(hass):
+    """HA persons appear as Kustos users and presence persons; rename syncs."""
+    hass.states.async_set("person.dustin", "home", {"friendly_name": "Dustin"})
+    hass.states.async_set("person.petra", "home", {"friendly_name": "Petra"})
+    entry, _ = await _setup(hass)
+    storage = entry.runtime_data.storage
+
+    users = {u.get("person_entity"): u for u in storage.users.async_items()}
+    persons = {p.get("person_entity"): p for p in storage.persons.async_items()}
+    assert users["person.dustin"]["name"] == "Dustin"
+    assert users["person.petra"]["rights"]["can_arm"] is True
+    assert persons["person.dustin"]["tracker_entity"] == "person.dustin"
+
+    # Reload must not duplicate.
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    storage = entry.runtime_data.storage
+    assert len([u for u in storage.users.async_items() if u.get("person_entity")]) == 2
+
+    # A person added later appears without a restart.
+    hass.states.async_set("person.marcel", "home", {"friendly_name": "Marcel"})
+    await hass.async_block_till_done()
+    users = {u.get("person_entity"): u for u in storage.users.async_items()}
+    assert "person.marcel" in users
