@@ -381,6 +381,16 @@ BLOCK_SCHEMAS: dict[str, vol.Schema] = {
             vol.Optional("data", default=dict): dict,
         }
     ),
+    # Run HA scripts (escape hatch for everything Kustos has no block for).
+    # Scripts receive alarm context as variables under "kustos".
+    "script": vol.Schema(
+        {
+            vol.Required("type"): "script",
+            vol.Required("targets"): [cv.entity_id],
+            # Cancel still-running scripts when the alarm ends.
+            vol.Required("stop_on_end", default=False): cv.boolean,
+        }
+    ),
     # Lock or unlock; unlock is validated against life_safety_unlock_types.
     "lock": vol.Schema(
         {
@@ -465,8 +475,10 @@ PIN_SCHEMA = vol.All(cv.string, vol.Match(rf"^\d{{{PIN_MIN_LENGTH},}}$"))
 
 # Blocks that make an alarm locally perceivable; forbidden for silent types
 # (critique finding 1: a hold-up alarm must not be observable on site).
+# Scripts count as perceivable: their effect is unknown, so silent alarms
+# must not run them (fail-safe reading of critique finding 1).
 PERCEIVABLE_BLOCK_TYPES = frozenset(
-    {"flash_lights", "lights_on", "sound", "announce_loop"}
+    {"flash_lights", "lights_on", "sound", "announce_loop", "script"}
 )
 
 

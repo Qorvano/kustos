@@ -17,6 +17,7 @@ export const BLOCK_DESCRIPTIONS = {
   announce_loop: "Wiederkehrende Sprachansage über einen Notify-Service, mit Lautstärke-Restore",
   notify: "Einmalige Benachrichtigung beim Start der Stufe",
   lock: "Türschlösser verriegeln oder (bei Feuer/CO) öffnen",
+  script: "Home-Assistant-Skript starten, mit Alarm-Kontext als Variablen",
 };
 
 export const ROLES = ["inactive", "instant", "delayed", "follower"];
@@ -33,6 +34,7 @@ export const BLOCK_DEFAULTS = {
   notify:       { type: "notify", services: [], title: "", message: "",
                   critical: false, ack_action: false },
   lock:         { type: "lock", targets: [], action: "lock" },
+  script:       { type: "script", targets: [], stop_on_end: false },
 };
 
 export const EDITOR_TITLES = {
@@ -279,6 +281,13 @@ function blockFields(ctx, b, i, j) {
         ${switchRow(id("ack"), "Mit Quittieren-Knopf", b.ack_action,
           "quittiert den Alarmspeicher direkt aus der Push heraus")}`;
     }
+    case "script":
+      return `${pick("targets", "Skripte", ["script"])}
+        ${switchRow(id("stop_on_end"), "Beim Alarmende stoppen", b.stop_on_end,
+          "laufende Skripte werden beim Entschärfen abgebrochen")}
+        <p class="muted">Im Skript verfügbar: <code>kustos.bereich</code>, <code>kustos.alarmtyp</code>,
+          <code>kustos.sensoren</code> (Liste), <code>kustos.panel_id</code>.
+          Läuft nicht bei stillen Alarmen (Wirkung nicht prüfbar).</p>`;
     case "lock":
       return `${pick("targets", "Schlösser", ["lock"])}
         <div class="form-grid" style="margin-top:12px;">${selectField(id("action"), "Aktion",

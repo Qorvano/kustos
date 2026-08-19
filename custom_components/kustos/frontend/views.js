@@ -27,6 +27,7 @@ export const SENSOR_TYPE_LABELS_VIEW = {
 export const BLOCK_LABELS = {
   flash_lights: "Licht blinken", lights_on: "Licht an", sound: "Alarmgeber",
   announce_loop: "Ansage-Loop", notify: "Benachrichtigung", lock: "Schloss",
+  script: "Skript ausführen",
 };
 
 const rowActions = (edit, del) => `

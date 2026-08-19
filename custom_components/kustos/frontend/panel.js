@@ -658,6 +658,10 @@ class KustosPanel extends HTMLElement {
             if (this._q(id("ack"))) b.ack_action = this._chk(id("ack"));
             break;
           case "lock": listF("targets"); if (this._q(id("action"))) b.action = this._val(id("action")); break;
+          case "script":
+            listF("targets");
+            if (this._q(id("stop_on_end"))) b.stop_on_end = this._chk(id("stop_on_end"));
+            break;
         }
       });
     });

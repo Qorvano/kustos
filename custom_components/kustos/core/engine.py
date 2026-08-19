@@ -460,6 +460,24 @@ class ReactionEngine:
             domain, service = target.split(".", 1)
             await self._call(domain, service, payload)
 
+    async def _block_script(self, record: dict[str, Any], block: dict[str, Any]) -> None:
+        runtime = self.panel_state_lookup(record["panel_id"])
+        variables = {
+            "kustos": {
+                "panel_id": record["panel_id"],
+                "bereich": str(self.title_lookup(record["panel_id"])),
+                "alarmtyp": record["alarm_type"],
+                "sensoren": [
+                    e.get("entity_id") for e in runtime.get("alarm_memory", [])
+                ],
+                "instance_id": record["instance_id"],
+            }
+        }
+        for target in block["targets"]:
+            await self._call(
+                "script", "turn_on", {"entity_id": target, "variables": variables}
+            )
+
     async def _block_lock(self, record: dict[str, Any], block: dict[str, Any]) -> None:
         if block["action"] == "unlock":
             allowed = self._storage.setting("engine", "life_safety_unlock_types")
@@ -489,6 +507,12 @@ class ReactionEngine:
             for block in stage["blocks"]:
                 if block["type"] == "sound":
                     await self._sound_off(record, block)
+        # 2b) User scripts that asked to be cancelled with the alarm.
+        for stage in record["stages"]:
+            for block in stage["blocks"]:
+                if block["type"] == "script" and block.get("stop_on_end"):
+                    for target in block["targets"]:
+                        await self._call("script", "turn_off", {"entity_id": target})
         # 3) Announcements: stop playback, apply fallback volumes where the
         #    real volume was never readable (Echo pattern).
         for stage in record["stages"]:

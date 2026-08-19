@@ -385,3 +385,36 @@ async def test_notify_multi_target_placeholders_critical_and_ack(hass):
     hass.bus.async_fire("mobile_app_notification_action", {"action": action["action"]})
     await hass.async_block_till_done()
     assert hass.states.get(panel).attributes["alarm_memory"] == []
+
+
+async def test_script_block_runs_with_context_and_stops_on_disarm(hass):
+    entry, panel_id = await _setup(
+        hass,
+        [
+            {
+                "duration_s": None,
+                "blocks": [
+                    {
+                        "type": "script",
+                        "targets": ["script.alarm_sonderfall"],
+                        "stop_on_end": True,
+                    }
+                ],
+            }
+        ],
+    )
+    turn_on = async_mock_service(hass, "script", "turn_on")
+    turn_off = async_mock_service(hass, "script", "turn_off")
+    await _arm_and_trip(hass)
+    await asyncio.sleep(0.1)
+    await hass.async_block_till_done()
+
+    assert turn_on, "Skript muss gestartet werden"
+    variables = turn_on[0].data["variables"]["kustos"]
+    assert variables["alarmtyp"] == "burglary"
+    assert ZONE in variables["sensoren"]
+    assert variables["bereich"]
+
+    await _disarm(hass)
+    await hass.async_block_till_done()
+    assert turn_off, "stop_on_end muss das Skript beim Entschaerfen abbrechen"
