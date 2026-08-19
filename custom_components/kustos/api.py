@@ -16,6 +16,8 @@ from homeassistant.helpers.collection import DictStorageCollectionWebsocket
 from .const import DOMAIN
 from .core.auth import hash_pin
 from .schemas import (
+    GROUP_CREATE_FIELDS,
+    GROUP_UPDATE_FIELDS,
     PANEL_CREATE_FIELDS,
     PANEL_UPDATE_FIELDS,
     PERSON_CREATE_FIELDS,
@@ -68,6 +70,14 @@ def async_register(hass: HomeAssistant, storage: KustosStorage) -> None:
         "user",
         USER_CREATE_FIELDS,
         USER_UPDATE_FIELDS,
+        admin_only=True,
+    ).async_setup(hass)
+    DictStorageCollectionWebsocket(
+        storage.groups,
+        f"{DOMAIN}/groups",
+        "group",
+        GROUP_CREATE_FIELDS,
+        GROUP_UPDATE_FIELDS,
         admin_only=True,
     ).async_setup(hass)
     DictStorageCollectionWebsocket(
@@ -291,10 +301,23 @@ def ws_state_list(
         for fsm in hub.fsms.values()
     ]
     master_state, master_mode = hub.master_state
+    groups = []
+    for group in _storage(hass).groups.async_items():
+        g_state, g_mode = hub.group_state(group["id"])
+        groups.append(
+            {
+                "group_id": group["id"],
+                "name": group["name"],
+                "panel_ids": group["panel_ids"],
+                "state": g_state,
+                "arm_mode": g_mode,
+            }
+        )
     connection.send_result(
         msg["id"],
         {
             "panels": panels,
+            "groups": groups,
             "master": {"state": master_state, "arm_mode": master_mode},
             "presence": hub.presence.phases(),
             "walk_tests": {

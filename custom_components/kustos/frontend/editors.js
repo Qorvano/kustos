@@ -23,6 +23,7 @@ export const BLOCK_DEFAULTS = {
 
 export const EDITOR_TITLES = {
   settings: ["Einstellungen", "Einstellungen"],
+  group: ["Neue Bereichsgruppe", "Bereichsgruppe bearbeiten"],
   panel: ["Neuer Bereich", "Bereich bearbeiten"],
   zone: ["Neue Zone", "Zone bearbeiten"],
   profile: ["Neues Profil", "Profil bearbeiten"],
@@ -111,6 +112,7 @@ export function renderEditor(ctx) {
   const body = {
     panel: panelEditor, zone: zoneEditor, profile: profileEditor,
     member: memberEditor, rule: ruleEditor, settings: settingsEditor,
+    group: groupEditor,
   }[kind](ctx, draft);
   return `<div class="cards">${body}</div>
     <button class="fab" data-action="save-${kind}" data-id="${draft.id || ""}"
@@ -135,10 +137,14 @@ function panelEditor(ctx, doc) {
   const assignments = `<div class="form-grid">${ALARM_TYPES.map((t) =>
     selectField(`prof-${t}`, ALARM_TYPE_LABELS[t],
       profileOptions(), ((doc.alarm_types || {})[t] || {}).profile_id || "")).join("")}</div>`;
+  const scopeType = doc.scope?.type === "custom" ? "custom" : "area";
   return `
     ${card("Bereich", `<div class="form">
+      ${selectField("f-scopetype", "Art des Bereichs",
+        [["area", "Home-Assistant-Bereich"], ["custom", "Individuell (nur Kustos)"]], scopeType)}
       ${pickerField(ctx, "f-area", "Home-Assistant-Bereich", doc.scope?.area_id, { kind: "area" })}
-    </div>`)}
+      ${textField("f-cname", "Eigener Name (bei Individuell)", doc.scope?.name)}
+    </div>`, "es gilt das Feld passend zur gewählten Art")}
     ${card("Modi", modes, "Zeiten leer = zentrale Standardwerte")}
     ${card("Optionen", `
       ${switchRow("f-codearm", "Code zum Scharfschalten", opts.code_arm_required)}
@@ -269,6 +275,16 @@ function memberEditor(ctx, draft) {
     </div>`, "ohne Distanzquelle zählt anhaltendes not_home")}`;
 }
 
+function groupEditor(ctx, doc) {
+  const checks = (ctx._data.panels || []).map((p) =>
+    checkChip("g-panel", p.id, ctx._panelName(p.id),
+      (doc.panel_ids || []).includes(p.id))).join("");
+  return `
+    ${card("Bereichsgruppe", `<div class="form">${textField("g-name", "Name", doc.name)}</div>`,
+      "schaltet als Einheit; die Gesamtheit aller Zonen zählt")}
+    ${card("Mitglieder", checks || '<span class="muted">Noch keine Bereiche angelegt.</span>')}`;
+}
+
 function ruleEditor(ctx, doc) {
   const arm = doc.arm || {};
   const personChecks = (ctx._data.persons || [])
@@ -280,7 +296,9 @@ function ruleEditor(ctx, doc) {
       ${switchRow("r-enabled", "Aktiv", doc.enabled !== false)}`)}
     ${card("Scharfschalten", `<div class="form-grid">
       ${selectField("r-panel", "Bereich",
-        [["master", "Gesamtsystem"], ...(ctx._data.panels || []).map((p) => [p.id, ctx._panelName(p.id)])],
+        [["master", "Gesamtsystem"],
+         ...(ctx._data.panels || []).map((p) => [p.id, ctx._panelName(p.id)]),
+         ...((ctx._data.state.groups || []).map((g) => [g.group_id, `Gruppe: ${g.name}`]))],
         doc.panel_id || "master")}
       ${selectField("r-mode", "Modus", ALL_MODES.map((m) => [m, MODE_LABELS[m]]), arm.mode || "armed_away")}
       ${selectField("r-exec", "Ausführung",

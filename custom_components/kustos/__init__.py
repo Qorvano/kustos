@@ -47,6 +47,7 @@ async def _async_get_storage(hass: HomeAssistant) -> KustosStorage:
                 hass.config_entries.async_schedule_reload(entry.entry_id)
 
         storage.panels.async_add_listener(_panels_changed)
+        storage.groups.async_add_listener(_panels_changed)
         api.async_register(hass, storage)
         await panel.async_register_panel(hass)
     return domain_data["storage"]

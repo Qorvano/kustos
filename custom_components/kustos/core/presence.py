@@ -260,10 +260,10 @@ class PresenceManager:
         return active, trip_key
 
     def _panel_states(self, rule: dict[str, Any]) -> dict[str, PanelState]:
-        if rule["panel_id"] == "master":
-            return {pid: fsm.state for pid, fsm in self._hub.fsms.items()}
-        fsm = self._hub.fsms.get(rule["panel_id"])
-        return {rule["panel_id"]: fsm.state} if fsm else {}
+        return {
+            pid: self._hub.fsms[pid].state
+            for pid in self._hub.resolve_target(rule["panel_id"])
+        }
 
     @callback
     def _evaluate_rules(self) -> None:

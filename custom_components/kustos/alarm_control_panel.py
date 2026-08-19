@@ -49,6 +49,8 @@ async def async_setup_entry(
         KustosAreaPanel(hub, panel_id) for panel_id in hub.fsms
     ]
     entities.append(KustosMasterPanel(hub))
+    for group in entry.runtime_data.storage.groups.async_items():
+        entities.append(KustosGroupPanel(hub, group))
     async_add_entities(entities)
 
     platform = entity_platform.async_get_current_platform()
@@ -151,7 +153,7 @@ class KustosAreaPanel(_KustosPanelBase):
             self._attr_supported_features |= _MODE_TO_FEATURE[mode]
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, panel_id)},
-            name=f"Kustos {fsm.area_id}" if fsm.area_id else "Kustos",
+            name=f"Kustos {hub.panel_title(panel_id)}",
             manufacturer="Qorvano",
             model="Kustos Panel",
         )
@@ -199,3 +201,46 @@ class KustosMasterPanel(_KustosPanelBase):
     def alarm_state(self) -> AlarmControlPanelState:
         state, mode = self._hub.master_state
         return self._to_ha_state(state, mode)
+
+
+class KustosGroupPanel(_KustosPanelBase):
+    """A user-defined set of panels; the union counts (arming pre-checks all
+    member zones, the aggregate state follows the most severe member)."""
+
+    def _code_required_for(self, action: str) -> bool:
+        return any(
+            self._hub.code_required(pid, action)
+            for pid in self._hub.resolve_target(self._panel_id)
+        )
+
+    def __init__(self, hub: KustosHub, group: dict) -> None:
+        super().__init__(hub, group["id"])
+        self._group = group
+        features = AlarmControlPanelEntityFeature(0)
+        for pid in hub.resolve_target(group["id"]):
+            for mode in hub.fsms[pid].enabled_modes:
+                features |= _MODE_TO_FEATURE[mode]
+        self._attr_supported_features = features
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, group["id"])},
+            name=f"Kustos {group['name']}",
+            manufacturer="Qorvano",
+            model="Kustos Gruppe",
+        )
+
+    @callback
+    def _on_panel_state(self, panel_id: str) -> None:
+        # Any member change may move the aggregate.
+        self.async_write_ha_state()
+
+    @property
+    def alarm_state(self) -> AlarmControlPanelState:
+        state, mode = self._hub.group_state(self._panel_id)
+        return self._to_ha_state(state, mode)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {
+            "group_id": self._panel_id,
+            "panels": self._hub.resolve_target(self._panel_id),
+        }

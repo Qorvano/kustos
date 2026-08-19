@@ -27,6 +27,7 @@ from .const import (
 )
 from .schemas import (
     DEFAULT_SETTINGS,
+    GROUP_FIELDS,
     PANEL_FIELDS,
     PERSON_FIELDS,
     PROFILE_FIELDS,
@@ -82,6 +83,10 @@ class RuleCollection(_UlidCollection):
     CREATE_UPDATE_SCHEMA = RULE_FIELDS
 
 
+class GroupCollection(_UlidCollection):
+    CREATE_UPDATE_SCHEMA = GROUP_FIELDS
+
+
 class KustosStorage:
     """Owns all Kustos stores and collections."""
 
@@ -121,6 +126,9 @@ class KustosStorage:
         self.rules = RuleCollection(
             Store(hass, STORAGE_VERSION, "kustos.rules", atomic_writes=True)
         )
+        self.groups = GroupCollection(
+            Store(hass, STORAGE_VERSION, "kustos.groups", atomic_writes=True)
+        )
         self.settings: dict[str, Any] = {}
         self.runtime: dict[str, Any] = {}
 
@@ -136,6 +144,7 @@ class KustosStorage:
         await self.users.async_load()
         await self.persons.async_load()
         await self.rules.async_load()
+        await self.groups.async_load()
         self.pins = await self._pin_store.async_load() or {}
         self.snapshots = await self._snapshot_store.async_load() or {}
         self.runtime = await self._runtime_store.async_load() or {"panels": {}}

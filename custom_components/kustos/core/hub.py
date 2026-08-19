@@ -38,6 +38,7 @@ from .audit import AuditLog
 from .auth import needs_rehash, verify_pin
 from .engine import ReactionEngine
 from .fsm import (
+    ArmFailReason,
     ArmResult,
     Effects,
     ModeTimes,
@@ -330,6 +331,18 @@ class KustosHub:
     # Code validation (M3)
     # ------------------------------------------------------------------
 
+    def panel_title(self, panel_id: str) -> str:
+        doc = self.panel_doc(panel_id)
+        if doc is None:
+            return panel_id
+        scope = doc["scope"]
+        if scope["type"] == PanelScope.CUSTOM:
+            return scope.get("name") or panel_id
+        from homeassistant.helpers import area_registry as ar
+
+        area = ar.async_get(self._hass).async_get_area(scope.get("area_id") or "")
+        return (area.name if area else None) or scope.get("area_id") or panel_id
+
     def panel_doc(self, panel_id: str) -> dict[str, Any] | None:
         return next(
             (p for p in self._storage.panels.async_items() if p["id"] == panel_id), None
@@ -394,16 +407,26 @@ class KustosHub:
         skip_delay: bool = False,
         code: str | None = None,
     ) -> ArmResult:
-        if panel_id == MASTER_ID:
+        members = self.resolve_target(panel_id)
+        if len(members) != 1 or members[0] != panel_id:
+            # Master or group: the UNION counts (user requirement). Members
+            # without this mode are skipped; any blocking zone anywhere
+            # blocks the whole target so nothing arms half-way.
+            armable = [
+                pid for pid in members if mode in self.fsms[pid].enabled_modes
+            ]
+            if not force:
+                blocking_union: list[str] = []
+                for pid in armable:
+                    blocking_union.extend(self.blocking_zones(pid, mode))
+                if blocking_union:
+                    return ArmResult(
+                        False, ArmFailReason.OPEN_ZONES, tuple(blocking_union)
+                    )
             result = ArmResult(True)
-            for area_panel_id in self.fsms:
+            for pid in armable:
                 result = await self.async_arm(
-                    area_panel_id,
-                    mode,
-                    actor,
-                    force=force,
-                    skip_delay=skip_delay,
-                    code=code,
+                    pid, mode, actor, force=force, skip_delay=skip_delay, code=code
                 )
                 if not result.ok:
                     return result
@@ -426,9 +449,10 @@ class KustosHub:
     async def async_disarm(
         self, panel_id: str, actor: str, code: str | None = None
     ) -> None:
-        if panel_id == MASTER_ID:
-            for area_panel_id in self.fsms:
-                await self.async_disarm(area_panel_id, actor, code=code)
+        members = self.resolve_target(panel_id)
+        if len(members) != 1 or members[0] != panel_id:
+            for pid in members:
+                await self.async_disarm(pid, actor, code=code)
             return
         user, is_duress = self._validate_code(panel_id, code, "disarm")
         if user is not None:
@@ -450,9 +474,10 @@ class KustosHub:
             )
 
     async def async_acknowledge(self, panel_id: str, actor: str) -> None:
-        if panel_id == MASTER_ID:
-            for area_panel_id in self.fsms:
-                await self.async_acknowledge(area_panel_id, actor)
+        members = self.resolve_target(panel_id)
+        if len(members) != 1 or members[0] != panel_id:
+            for pid in members:
+                await self.async_acknowledge(pid, actor)
             return
         fsm = self.fsms[panel_id]
         self._apply_effects(panel_id, fsm.acknowledge(actor))
@@ -529,12 +554,27 @@ class KustosHub:
         return [zone.entity_id for zone in fsm.zones.values()]
 
     # ------------------------------------------------------------------
-    # Master aggregation (provisional M1 policy, configurable later)
+    # Aggregation: master and panel groups share the same union semantics
     # ------------------------------------------------------------------
 
-    @property
-    def master_state(self) -> tuple[PanelState, ArmMode | None]:
-        states = [(fsm.state, fsm.arm_mode) for fsm in self.fsms.values()]
+    def resolve_target(self, target_id: str) -> list[str]:
+        """Master, group id or panel id -> list of member panel ids."""
+        if target_id == MASTER_ID:
+            return list(self.fsms)
+        group = next(
+            (g for g in self._storage.groups.async_items() if g["id"] == target_id),
+            None,
+        )
+        if group is not None:
+            return [pid for pid in group["panel_ids"] if pid in self.fsms]
+        return [target_id] if target_id in self.fsms else []
+
+    def _aggregate(self, panel_ids: list[str]) -> tuple[PanelState, ArmMode | None]:
+        states = [
+            (self.fsms[pid].state, self.fsms[pid].arm_mode)
+            for pid in panel_ids
+            if pid in self.fsms
+        ]
         if not states:
             return (PanelState.DISARMED, None)
         for severity in (PanelState.TRIGGERED, PanelState.PENDING, PanelState.ARMING):
@@ -548,6 +588,13 @@ class KustosHub:
             # Mixed armed modes: report the most restrictive one.
             return (PanelState.ARMED, ArmMode.AWAY)
         return (PanelState.DISARMED, None)
+
+    @property
+    def master_state(self) -> tuple[PanelState, ArmMode | None]:
+        return self._aggregate(list(self.fsms))
+
+    def group_state(self, group_id: str) -> tuple[PanelState, ArmMode | None]:
+        return self._aggregate(self.resolve_target(group_id))
 
     # ------------------------------------------------------------------
     # Effects

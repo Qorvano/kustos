@@ -68,7 +68,8 @@ class ZoneRole(StrEnum):
 
 
 class PanelScope(StrEnum):
-    AREA = "area"
+    AREA = "area"          # bound to a HA area from the registry
+    CUSTOM = "custom"      # free-named Kustos-only area
     MASTER = "master"
 
 

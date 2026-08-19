@@ -99,7 +99,12 @@ class KustosPanel extends HTMLElement {
   }
   _panelName(panelId) {
     const doc = (this._data.panels || []).find((p) => p.id === panelId);
-    return doc ? (this._areaName(doc.scope.area_id) || doc.scope.type) : panelId;
+    if (doc) {
+      if (doc.scope.type === "custom") return doc.scope.name || panelId;
+      return this._areaName(doc.scope.area_id) || doc.scope.type;
+    }
+    const group = (this._data.state?.groups || []).find((g) => g.group_id === panelId);
+    return group ? group.name : panelId;
   }
   _zoneName(zoneId) {
     const z = (this._data.zones || []).find((x) => x.id === zoneId);
@@ -294,9 +299,11 @@ class KustosPanel extends HTMLElement {
         const v = this._val(`prof-${t}`);
         if (v) alarm_types[t] = { profile_id: v };
       }
+      const scope = this._val("f-scopetype") === "custom"
+        ? { type: "custom", name: this._val("f-cname") }
+        : { type: "area", area_id: this._val("f-area") };
       const payload = {
-        scope: { type: "area", area_id: this._val("f-area") },
-        modes, alarm_types,
+        scope, modes, alarm_types,
         options: {
           code_arm_required: this._chk("f-codearm"),
           code_disarm_required: this._chk("f-codedisarm"),
@@ -365,6 +372,29 @@ class KustosPanel extends HTMLElement {
       const res = ds.id
         ? await this._ws("kustos/profiles/update", { profile_id: ds.id, ...payload })
         : await this._ws("kustos/profiles/create", payload);
+      if (res.ok) { this._edit = null; this._refresh(); }
+      return;
+    }
+
+    // Bereichsgruppen
+    if (a === "new-group") { this._edit = { kind: "group", draft: { panel_ids: [] } }; return this._render(); }
+    if (a === "edit-group") {
+      const g = (this._data.state.groups || []).find((x) => x.group_id === ds.id);
+      this._edit = { kind: "group", draft: { id: g.group_id, name: g.name, panel_ids: g.panel_ids } };
+      return this._render();
+    }
+    if (a === "del-group") {
+      if (!confirm("Bereichsgruppe löschen? (Die Bereiche selbst bleiben.)")) return;
+      await this._ws("kustos/groups/delete", { group_id: ds.id }); return this._refresh();
+    }
+    if (a === "save-group") {
+      const payload = {
+        name: this._val("g-name"),
+        panel_ids: [...this.shadowRoot.querySelectorAll(".g-panel:checked")].map((x) => x.value),
+      };
+      const res = ds.id
+        ? await this._ws("kustos/groups/update", { group_id: ds.id, ...payload })
+        : await this._ws("kustos/groups/create", payload);
       if (res.ok) { this._edit = null; this._refresh(); }
       return;
     }
@@ -516,7 +546,8 @@ class KustosPanel extends HTMLElement {
   async _service(service, panelId) {
     let entityId = null;
     for (const [eid, st] of Object.entries(this._hass.states)) {
-      if (eid.startsWith("alarm_control_panel.") && st.attributes.panel_id === panelId) {
+      if (eid.startsWith("alarm_control_panel.")
+          && (st.attributes.panel_id === panelId || st.attributes.group_id === panelId)) {
         entityId = eid; break;
       }
     }

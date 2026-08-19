@@ -80,6 +80,18 @@ export function renderLeitstand(ctx) {
         listRow("account", esc(p.name),
           `${PHASE_LABELS[p.phase] || p.phase}${p.trip_id ? ` | Trip ${p.trip_id.slice(-6)}` : ""}`)).join("")}
       </div></div>` : "";
+  const groupCards = (state.groups || []).map((g) => `
+    <div class="card"><div class="card-header">${esc(g.name)}
+        <span class="hint">Gruppe</span></div>
+      <div class="card-content"><div class="big-state ${g.state}">
+        ${STATE_LABELS[g.state] || g.state}
+        ${g.arm_mode ? `<span class="chip">${MODE_LABELS[g.arm_mode] || g.arm_mode}</span>` : ""}</div>
+      <p class="muted">${g.panel_ids.map((pid) => esc(ctx._panelName(pid))).join(", ")}</p></div>
+      <div class="card-actions">
+        <button class="btn" data-action="service" data-service="alarm_arm_away" data-panel="${g.group_id}">Abwesend</button>
+        <button class="btn" data-action="service" data-service="alarm_arm_night" data-panel="${g.group_id}">Nacht</button>
+        <button class="btn" data-action="service" data-service="alarm_disarm" data-panel="${g.group_id}">Unscharf</button>
+      </div></div>`).join("");
   return `<div class="cards">
     <div class="card"><div class="card-header">Gesamtsystem</div>
       <div class="card-content"><div class="big-state ${master.state}">
@@ -87,6 +99,7 @@ export function renderLeitstand(ctx) {
         ${master.arm_mode ? `<span class="chip">${MODE_LABELS[master.arm_mode] || master.arm_mode}</span>` : ""}
       </div></div></div>
     ${cards.join("") || `<div class="card"><div class="empty">Noch keine Bereiche. Lege im Tab "Bereiche" den ersten an.</div></div>`}
+    ${groupCards}
     ${presenceCard}</div>`;
 }
 
@@ -108,7 +121,7 @@ export function renderBereiche(ctx) {
     )).join("");
     return `
       <div class="card">
-        <div class="card-header">${esc(ctx._areaName(p.scope.area_id) || p.scope.type)}
+        <div class="card-header">${esc(p.scope.type === "custom" ? p.scope.name : (ctx._areaName(p.scope.area_id) || p.scope.type))}
           <span class="hint">${modes || "keine Modi aktiviert"}</span></div>
         ${zones.length ? `<div class="rows">${zoneRows}</div>`
           : `<div class="empty">Keine Zonen in diesem Bereich.</div>`}
@@ -119,8 +132,21 @@ export function renderBereiche(ctx) {
         </div>
       </div>`;
   });
+  const groups = (ctx._data.state.groups || []).map((g) => listRow("shield",
+    esc(g.name),
+    `${g.panel_ids.map((pid) => esc(ctx._panelName(pid))).join(", ") || "keine Mitglieder"}`,
+    rowActions(
+      { action: "edit-group", attrs: `data-id="${g.group_id}"` },
+      { action: "del-group", attrs: `data-id="${g.group_id}"` })
+  )).join("");
   return `<div class="cards">${cards.join("") ||
-    `<div class="card"><div class="empty">Noch keine Bereiche angelegt.</div></div>`}</div>
+    `<div class="card"><div class="empty">Noch keine Bereiche angelegt.</div></div>`}
+    <div class="card"><div class="card-header">Bereichsgruppen
+        <span class="hint">schalten als Einheit, die Gesamtheit der Zonen zählt</span></div>
+      ${groups ? `<div class="rows">${groups}</div>`
+        : `<div class="empty">Noch keine Gruppen.</div>`}
+      <div class="card-actions"><button class="btn" data-action="new-group">${icon("plus",18)} Gruppe</button></div>
+    </div></div>
     <button class="fab" data-action="new-panel">${icon("plus",20)} Bereich anlegen</button>`;
 }
 
@@ -212,7 +238,7 @@ export function renderBetrieb(ctx) {
   const walk = (ctx._data.panels || []).map((p) => {
     const info = (ctx._data.state.walk_tests || {})[p.id];
     return listRow("shield",
-      `Walk-Test: ${esc(ctx._areaName(p.scope.area_id) || p.scope.type)}`,
+      `Walk-Test: ${esc(p.scope.type === "custom" ? p.scope.name : (ctx._areaName(p.scope.area_id) || p.scope.type))}`,
       info
         ? `läuft, Ende <span data-ends-at="${info.ends_at}"></span> | getestet: ${
             info.tested.map((z) => esc(ctx._zoneName(z))).join(", ") || "noch keine Zone"}`

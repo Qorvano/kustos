@@ -140,11 +140,15 @@ MODE_CONFIG_SCHEMA = vol.Schema(
 
 
 def _validate_scope(scope: dict[str, Any]) -> dict[str, Any]:
-    """An area panel needs an area_id; the master panel must not have one."""
+    """Area panels need an area_id, custom panels a name, master neither."""
     if scope["type"] == PanelScope.AREA and not scope.get("area_id"):
         raise vol.Invalid("area panels require area_id")
-    if scope["type"] == PanelScope.MASTER and scope.get("area_id"):
-        raise vol.Invalid("master panel must not carry an area_id")
+    if scope["type"] == PanelScope.CUSTOM and not scope.get("name"):
+        raise vol.Invalid("custom panels require a name")
+    if scope["type"] == PanelScope.MASTER and (
+        scope.get("area_id") or scope.get("name")
+    ):
+        raise vol.Invalid("master panel must not carry area_id or name")
     return scope
 
 
@@ -152,11 +156,24 @@ SCOPE_SCHEMA = vol.All(
     vol.Schema(
         {
             vol.Required("type"): vol.Coerce(PanelScope),
-            vol.Optional("area_id"): cv.string,
+            vol.Optional("area_id"): vol.Any(None, cv.string),
+            vol.Optional("name"): vol.Any(None, cv.string),
         }
     ),
     _validate_scope,
 )
+
+
+# Panel groups: any set of Kustos panels, armable/aggregating as one unit.
+GROUP_CREATE_FIELDS = {
+    vol.Required("name"): cv.string,
+    vol.Required("panel_ids", default=list): [cv.string],
+}
+GROUP_UPDATE_FIELDS = {
+    vol.Optional("name"): cv.string,
+    vol.Optional("panel_ids"): [cv.string],
+}
+GROUP_FIELDS = vol.Schema(GROUP_CREATE_FIELDS)
 
 PANEL_OPTIONS_SCHEMA = vol.Schema(
     {
